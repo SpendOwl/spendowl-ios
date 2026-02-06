@@ -1,0 +1,31 @@
+# Build
+.build/
+DerivedData/
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+
+# Swift Package Manager
+.swiftpm/
+Package.resolved
+
+# Xcode
+xcuserdata/
+*.xccheckout
+*.xcscmblueprint
+*.xcworkspacedata
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# IDE
+*.idea/
+*.vscode/
+.claude/
+
+# Archives
+*.ipa
+*.dSYM.zip
+*.dSYM
