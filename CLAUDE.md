@@ -4,7 +4,7 @@ This file provides guidance for Claude Code when working with the SpendOwl iOS S
 
 ## Project Overview
 
-SpendOwl is a lightweight iOS SDK for Apple Search Ads attribution and StoreKit 2 purchase tracking. It uses a backend-driven architecture where attribution tokens are sent to SpendOwl servers for processing.
+SpendOwl is a lightweight iOS SDK for Apple Ads attribution and StoreKit 2 purchase tracking. It uses a backend-driven architecture where attribution tokens are sent to SpendOwl servers for processing.
 
 ## Project Structure
 

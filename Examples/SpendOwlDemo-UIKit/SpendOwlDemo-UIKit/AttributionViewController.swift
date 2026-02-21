@@ -108,7 +108,7 @@ class AttributionViewController: UITableViewController {
     override func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
         switch Section(rawValue: section)! {
         case .attribution:
-            return "Attribution data from Apple Search Ads via SpendOwl backend."
+            return "Attribution data from Apple Ads via SpendOwl backend."
         case .userIdentity:
             return "Set a user ID to link attribution with your user accounts."
         case .purchases:

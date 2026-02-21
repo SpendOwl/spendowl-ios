@@ -1,19 +1,19 @@
 <h1 align="center">SpendOwl</h1>
 
-<h3 align="center">Measure True ROAS for Apple Search Ads</h3>
+<h3 align="center">Measure True ROAS for Apple Ads</h3>
 
 <p align="center">
-  <a href="https://github.com/spendowl/spendowl-ios/releases"><img src="https://img.shields.io/github/v/release/spendowl/spendowl-ios?style=flat" alt="Release"></a>
-  <a href="https://swiftpackageindex.com/spendowl/spendowl-ios"><img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fswiftpackageindex.com%2Fapi%2Fpackages%2Fspendowl%2Fspendowl-ios%2Fbadge%3Ftype%3Dswift-versions" alt="Swift"></a>
-  <a href="https://swiftpackageindex.com/spendowl/spendowl-ios"><img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fswiftpackageindex.com%2Fapi%2Fpackages%2Fspendowl%2Fspendowl-ios%2Fbadge%3Ftype%3Dplatforms" alt="Platforms"></a>
+  <a href="https://github.com/SpendOwl/spendowl-ios/releases"><img src="https://img.shields.io/github/v/release/SpendOwl/spendowl-ios?style=flat" alt="Release"></a>
+  <a href="https://swiftpackageindex.com/SpendOwl/spendowl-ios"><img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fswiftpackageindex.com%2Fapi%2Fpackages%2FSpendOwl%2Fspendowl-ios%2Fbadge%3Ftype%3Dswift-versions" alt="Swift"></a>
+  <a href="https://swiftpackageindex.com/SpendOwl/spendowl-ios"><img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fswiftpackageindex.com%2Fapi%2Fpackages%2FSpendOwl%2Fspendowl-ios%2Fbadge%3Ftype%3Dplatforms" alt="Platforms"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License"></a>
 </p>
 
-SpendOwl connects your Apple Search Ads spend to actual revenue. Get campaign, ad group, and keyword-level ROAS in your dashboard.
+SpendOwl connects your Apple Ads spend to actual revenue. Get campaign, ad group, and keyword-level ROAS in your dashboard.
 
 ## Why SpendOwl?
 
-- **Attribution Tracking** — Campaign, ad group, keyword, and placement data from Apple Search Ads
+- **Attribution Tracking** — Campaign, ad group, keyword, and placement data from Apple Ads
 - **Revenue Tracking** — Automatic StoreKit 2 purchase observation
 - **Backend-Driven** — Apple API changes require no SDK updates
 - **Works with RevenueCat/Adapty** — No conflicts with other subscription SDKs
@@ -24,7 +24,7 @@ SpendOwl connects your Apple Search Ads spend to actual revenue. Get campaign, a
 ### Swift Package Manager
 
 ```
-https://github.com/spendowl/spendowl-ios
+https://github.com/SpendOwl/spendowl-ios
 ```
 
 ## Quick Start

@@ -9,7 +9,7 @@
 import AdServices
 import Foundation
 
-/// Internal service for retrieving Apple Search Ads attribution.
+/// Internal service for retrieving Apple Ads attribution.
 ///
 /// Uses Apple's AdServices framework to obtain an attribution token,
 /// which is sent to SpendOwl's backend for processing. The backend

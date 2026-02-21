@@ -11,7 +11,7 @@ import Foundation
 /// The result of an attribution lookup.
 ///
 /// Contains information about how the user discovered and installed your app,
-/// including campaign, ad group, and keyword data from Apple Search Ads.
+/// including campaign, ad group, and keyword data from Apple Ads.
 ///
 /// ## Example
 ///
@@ -36,12 +36,12 @@ public struct AttributionResult: Sendable {
     /// The attribution status indicating how the user acquired the app.
     public let status: AttributionStatus
 
-    /// The Apple Search Ads campaign ID.
+    /// The Apple Ads campaign ID.
     ///
     /// Only available when `status` is `.attributed`.
     public let campaignId: Int?
 
-    /// The Apple Search Ads campaign name.
+    /// The Apple Ads campaign name.
     ///
     /// Only available when `status` is `.attributed`.
     public let campaignName: String?
@@ -117,7 +117,7 @@ extension AttributionResult: Equatable {}
 
 /// The attribution status indicating how the user acquired the app.
 public enum AttributionStatus: String, Sendable {
-    /// The user installed the app after clicking an Apple Search Ads advertisement.
+    /// The user installed the app after clicking an Apple Ads advertisement.
     ///
     /// When attributed, the ``AttributionResult`` contains campaign, ad group,
     /// and keyword data.

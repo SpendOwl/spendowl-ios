@@ -10,7 +10,7 @@ import Foundation
 
 /// The main entry point for the SpendOwl SDK.
 ///
-/// SpendOwl provides Apple Search Ads attribution and purchase tracking for iOS apps,
+/// SpendOwl provides Apple Ads attribution and purchase tracking for iOS apps,
 /// enabling accurate ROAS (Return on Ad Spend) measurement.
 ///
 /// ## Overview

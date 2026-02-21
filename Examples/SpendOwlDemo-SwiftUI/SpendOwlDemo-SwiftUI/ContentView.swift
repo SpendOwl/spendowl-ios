@@ -46,7 +46,7 @@ struct ContentView: View {
                 } header: {
                     Text("Attribution")
                 } footer: {
-                    Text("Attribution data from Apple Search Ads via SpendOwl backend.")
+                    Text("Attribution data from Apple Ads via SpendOwl backend.")
                 }
 
                 // User ID Section

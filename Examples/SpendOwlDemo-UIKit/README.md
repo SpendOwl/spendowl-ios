@@ -4,7 +4,7 @@ A UIKit sample app demonstrating SpendOwl SDK integration.
 
 ## Features
 
-- **Attribution Tracking** - Fetch and display Apple Search Ads attribution data
+- **Attribution Tracking** - Fetch and display Apple Ads attribution data
 - **User Identity** - Set and clear user IDs
 - **Purchase Tracking** - Automatic StoreKit 2 purchase tracking
 - **Debug Controls** - Toggle logging and view SDK status
