@@ -17,6 +17,7 @@ final class EventQueue: @unchecked Sendable {
     // MARK: - Properties
 
     private let defaults: Defaults
+    private let lock = NSLock()
     private let maxEvents = 100
 
     // MARK: - Initialization
@@ -34,6 +35,9 @@ final class EventQueue: @unchecked Sendable {
     /// - Parameter events: The purchase events to enqueue.
     func enqueue(_ events: [PurchaseEvent]) {
         guard !events.isEmpty else { return }
+
+        lock.lock()
+        defer { lock.unlock() }
 
         var current = loadEvents()
         current.append(contentsOf: events)
@@ -53,7 +57,9 @@ final class EventQueue: @unchecked Sendable {
     ///
     /// - Returns: The pending events in FIFO order.
     func peek() -> [PurchaseEvent] {
-        loadEvents()
+        lock.lock()
+        defer { lock.unlock() }
+        return loadEvents()
     }
 
     /// Removes the first `count` events from the queue after successful send.
@@ -61,6 +67,9 @@ final class EventQueue: @unchecked Sendable {
     /// - Parameter count: The number of events to remove from the front.
     func remove(count: Int) {
         guard count > 0 else { return }
+
+        lock.lock()
+        defer { lock.unlock() }
 
         var current = loadEvents()
         let removeCount = min(count, current.count)
@@ -72,7 +81,9 @@ final class EventQueue: @unchecked Sendable {
 
     /// The number of events waiting to be sent.
     var pendingCount: Int {
-        loadEvents().count
+        lock.lock()
+        defer { lock.unlock() }
+        return loadEvents().count
     }
 
     // MARK: - Persistence

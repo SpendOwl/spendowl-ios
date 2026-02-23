@@ -156,8 +156,7 @@ public final class SpendOwl: @unchecked Sendable {
     ///
     /// After configuration:
     /// - Attribution is automatically tracked
-    /// - StoreKit 2 purchases are automatically observed
-    /// - Both are required for accurate ROAS calculation
+    /// - Purchases are automatically tracked via StoreKit
     ///
     /// - Parameter apiKey: Your SpendOwl API key from the dashboard.
     /// - Important: Call this method only once. Subsequent calls are ignored.
