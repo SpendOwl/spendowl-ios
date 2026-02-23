@@ -14,7 +14,7 @@ SpendOwl connects your Apple Ads spend to actual revenue. Get campaign, ad group
 ## Why SpendOwl?
 
 - **Attribution Tracking** — Campaign, ad group, keyword, and placement data from Apple Ads
-- **Revenue Tracking** — Automatic StoreKit 2 purchase observation
+- **Revenue Tracking** — Automatic StoreKit purchase observation
 - **Backend-Driven** — Apple API changes require no SDK updates
 - **Works with RevenueCat/Adapty** — No conflicts with other subscription SDKs
 - **Privacy-First** — No IDFA required, includes privacy manifest
@@ -38,12 +38,12 @@ SpendOwl.configure(apiKey: "your-api-key")
 // 2. Set user ID (optional)
 SpendOwl.setUserId("user-123")
 
-// 3. Get attribution data
+// 3. That's it! Purchases are tracked automatically.
+
+// 4. Get attribution data (optional)
 let attribution = try await SpendOwl.attribution()
 print(attribution.campaignName ?? "organic")
 ```
-
-That's it. Purchases are tracked automatically.
 
 ## Requirements
 

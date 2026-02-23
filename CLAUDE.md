@@ -83,11 +83,16 @@ The SDK only calls `AAAttribution.attributionToken()` on device. The token is se
 
 ## Pre-commit Checks
 
-Before committing, ensure:
+**IMPORTANT: You MUST run all four checks before every commit. Do NOT commit or push without passing all of them.**
 
-1. All tests pass: `swift test`
-2. No lint warnings: `swiftlint lint`
-3. Code is formatted: `swiftformat Sources Tests`
+```bash
+swift build
+swift test
+swiftlint lint --config .swiftlint.yml --strict
+swiftformat Sources Tests --config .swiftformat --lint
+```
+
+All four must pass with zero errors before committing.
 
 ## Making Changes
 

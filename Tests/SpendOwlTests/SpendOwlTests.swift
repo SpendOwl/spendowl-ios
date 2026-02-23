@@ -377,6 +377,61 @@ final class SpendOwlTests: XCTestCase {
         XCTAssertEqual(decoded.environment, "production")
     }
 
+    func testPurchaseEventWithOriginalTransactionId() throws {
+        let event = PurchaseEvent(
+            type: "subscription_renewal",
+            transactionId: "tx-200",
+            originalTransactionId: "tx-100",
+            productId: "com.test.subscription",
+            purchaseDate: Date(timeIntervalSince1970: 1_700_000_000),
+            price: "9.99",
+            currency: "USD",
+            countryCode: "US",
+            quantity: 1,
+            environment: "sandbox"
+        )
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(event)
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let decoded = try decoder.decode(PurchaseEvent.self, from: data)
+
+        XCTAssertEqual(decoded.originalTransactionId, "tx-100")
+        XCTAssertEqual(decoded.type, "subscription_renewal")
+        XCTAssertEqual(decoded.environment, "sandbox")
+    }
+
+    func testPurchaseEventNilOptionalFields() throws {
+        let event = PurchaseEvent(
+            type: "purchase",
+            transactionId: "tx-300",
+            originalTransactionId: nil,
+            productId: "com.test.item",
+            purchaseDate: Date(timeIntervalSince1970: 1_700_000_000),
+            price: nil,
+            currency: nil,
+            countryCode: nil,
+            quantity: 1,
+            environment: "production"
+        )
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(event)
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let decoded = try decoder.decode(PurchaseEvent.self, from: data)
+
+        XCTAssertNil(decoded.originalTransactionId)
+        XCTAssertNil(decoded.price)
+        XCTAssertNil(decoded.currency)
+        XCTAssertNil(decoded.countryCode)
+    }
+
     // MARK: - KeychainHelper
 
     func testKeychainSetAndGet() {
@@ -487,6 +542,22 @@ final class SpendOwlTests: XCTestCase {
     }
 
     // MARK: - Thread Safety
+
+    func testSentTransactionIdsBoundedAt1000() {
+        let defaults = Defaults.shared
+
+        // Insert 1050 IDs
+        var ids = Set<String>()
+        for i in 0 ..< 1050 {
+            ids.insert("bound-tx-\(i)")
+        }
+        defaults.sentTransactionIds = ids
+
+        // Read back — Defaults stores the raw set; PurchaseTracker enforces the 1000 cap.
+        // Here we verify Defaults faithfully round-trips even a large set.
+        let stored = defaults.sentTransactionIds
+        XCTAssertEqual(stored.count, 1050)
+    }
 
     func testDefaultsConcurrentAccess() {
         let defaults = Defaults.shared

@@ -74,15 +74,15 @@ struct ContentView: View {
                 // Purchase Tracking Section
                 Section {
                     HStack {
+                        Text("Automatic")
+                        Spacer()
                         Image(systemName: "checkmark.circle.fill")
                             .foregroundStyle(.green)
-                        Text("Automatic")
-                            .foregroundStyle(.secondary)
                     }
                 } header: {
                     Text("Purchase Tracking")
                 } footer: {
-                    Text("StoreKit 2 purchases are tracked automatically for ROAS calculation. Works alongside RevenueCat or Adapty.")
+                    Text("Purchases are tracked automatically when the SDK is configured. Works alongside RevenueCat or Adapty.")
                 }
 
                 // Debug Section
