@@ -199,9 +199,13 @@ public final class SpendOwl: @unchecked Sendable {
             level: .info
         )
 
-        // Always track attribution for ROAS calculation
+        // Always track attribution for ROAS calculation. Wrapped in a background-task
+        // assertion so a quick backgrounding right after configure() doesn't suspend
+        // the request before the install can be recorded.
         Task {
+            let bgTask = await BackgroundTaskAssertion.begin(name: "SpendOwl.Attribution")
             await shared.trackAttributionInternal(completion: nil)
+            await bgTask.end()
         }
 
         // Always track purchases for ROAS calculation

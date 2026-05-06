@@ -227,21 +227,11 @@ final class PurchaseTracker: NSObject, SKPaymentTransactionObserver, @unchecked 
     ///
     /// Serialized via `_isSending` flag — concurrent callers return immediately.
     /// After a successful send, re-checks the queue to drain events that were
-    /// enqueued during the network call.
+    /// enqueued during the network call. Lock interactions live in sync helpers
+    /// so they're never reached from an async context (Swift 6 strict-concurrency).
     private func sendEnqueuedEvents() async {
-        lock.lock()
-        guard !_isSending else {
-            lock.unlock()
-            return
-        }
-        _isSending = true
-        lock.unlock()
-
-        defer {
-            lock.lock()
-            _isSending = false
-            lock.unlock()
-        }
+        guard tryAcquireSend() else { return }
+        defer { releaseSend() }
 
         // Loop to drain events enqueued while a send was in-flight.
         while true {
@@ -266,6 +256,22 @@ final class PurchaseTracker: NSObject, SKPaymentTransactionObserver, @unchecked 
                 return
             }
         }
+    }
+
+    /// Atomically claims the send slot. Returns `false` if a send is already in flight.
+    private func tryAcquireSend() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !_isSending else { return false }
+        _isSending = true
+        return true
+    }
+
+    /// Releases the send slot. Pairs with a successful ``tryAcquireSend()``.
+    private func releaseSend() {
+        lock.lock()
+        defer { lock.unlock() }
+        _isSending = false
     }
 
     // MARK: - Helpers
