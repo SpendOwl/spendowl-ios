@@ -37,6 +37,7 @@ final class Defaults: @unchecked Sendable {
         case lastSyncDate
         case sentTransactionIds
         case pendingEvents
+        case pendingAttribution
     }
 
     // MARK: - Accessors
@@ -80,6 +81,16 @@ final class Defaults: @unchecked Sendable {
     var pendingEventsData: Data? {
         get { suite.data(forKey: prefixed(.pendingEvents)) }
         set { suite.set(newValue, forKey: prefixed(.pendingEvents)) }
+    }
+
+    /// A pending attribution payload as JSON data for cross-launch retry.
+    ///
+    /// Persisted when the in-memory token-fetch and API retries are exhausted
+    /// (or pre-emptively before the first send) so the install isn't lost when
+    /// the app is backgrounded or killed mid-flight on first launch.
+    var pendingAttributionData: Data? {
+        get { suite.data(forKey: prefixed(.pendingAttribution)) }
+        set { suite.set(newValue, forKey: prefixed(.pendingAttribution)) }
     }
 
     // MARK: - Helpers

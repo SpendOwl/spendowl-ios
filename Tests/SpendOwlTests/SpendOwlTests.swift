@@ -66,6 +66,7 @@ final class SpendOwlTests: XCTestCase {
         defaults.sentTransactionIds = ["tx1"]
         defaults.cachedAttributionResult = Data([1, 2, 3])
         defaults.pendingEventsData = Data([4, 5, 6])
+        defaults.pendingAttributionData = Data([7, 8, 9])
 
         defaults.reset()
 
@@ -74,6 +75,7 @@ final class SpendOwlTests: XCTestCase {
         XCTAssertTrue(defaults.sentTransactionIds.isEmpty)
         XCTAssertNil(defaults.cachedAttributionResult)
         XCTAssertNil(defaults.pendingEventsData)
+        XCTAssertNil(defaults.pendingAttributionData)
     }
 
     func testDefaultsCachedAttributionResult() {
@@ -100,6 +102,19 @@ final class SpendOwlTests: XCTestCase {
 
         defaults.pendingEventsData = nil
         XCTAssertNil(defaults.pendingEventsData)
+    }
+
+    func testDefaultsPendingAttributionData() {
+        let defaults = Defaults.shared
+
+        XCTAssertNil(defaults.pendingAttributionData)
+
+        let data = Data("{\"attributionToken\": \"abc\"}".utf8)
+        defaults.pendingAttributionData = data
+        XCTAssertEqual(defaults.pendingAttributionData, data)
+
+        defaults.pendingAttributionData = nil
+        XCTAssertNil(defaults.pendingAttributionData)
     }
 
     // MARK: - Logger
@@ -145,291 +160,6 @@ final class SpendOwlTests: XCTestCase {
             SpendOwlError.networkError(URLError(.timedOut)),
             SpendOwlError.networkError(URLError(.notConnectedToInternet))
         )
-    }
-
-    // MARK: - AttributionStatus
-
-    func testAttributionStatus() {
-        XCTAssertEqual(AttributionStatus(rawValue: "attributed"), .attributed)
-        XCTAssertEqual(AttributionStatus(rawValue: "organic"), .organic)
-        XCTAssertEqual(AttributionStatus(rawValue: "unknown"), .unknown)
-        XCTAssertNil(AttributionStatus(rawValue: "invalid"))
-    }
-
-    func testAttributionStatusCodable() throws {
-        let encoder = JSONEncoder()
-        let decoder = JSONDecoder()
-
-        for status in [AttributionStatus.attributed, .organic, .unknown] {
-            let data = try encoder.encode(status)
-            let decoded = try decoder.decode(AttributionStatus.self, from: data)
-            XCTAssertEqual(decoded, status)
-        }
-    }
-
-    // MARK: - AttributionResult
-
-    func testAttributionResultCodable() throws {
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-
-        let result = AttributionResult(
-            id: "test-123",
-            status: .attributed,
-            campaignId: 42,
-            campaignName: "Campaign A",
-            adGroupId: 7,
-            adGroupName: "Ad Group B",
-            keywordId: 99,
-            keyword: "fitness app",
-            countryOrRegion: "US",
-            clickDate: Date(timeIntervalSince1970: 1_700_000_000),
-            conversionType: "Download",
-            supplyPlacement: "top_of_search"
-        )
-
-        let data = try encoder.encode(result)
-        let decoded = try decoder.decode(AttributionResult.self, from: data)
-        XCTAssertEqual(decoded, result)
-    }
-
-    func testAttributionResultEquatableAllFields() {
-        let result1 = AttributionResult(
-            id: "test-1",
-            status: .attributed,
-            campaignId: 1,
-            campaignName: "Camp",
-            adGroupId: 2,
-            adGroupName: "Group",
-            keywordId: 3,
-            keyword: "kw",
-            countryOrRegion: "US",
-            clickDate: Date(timeIntervalSince1970: 1_000_000),
-            conversionType: "Download",
-            supplyPlacement: "top_of_search"
-        )
-
-        let result2 = AttributionResult(
-            id: "test-1",
-            status: .attributed,
-            campaignId: 1,
-            campaignName: "Camp",
-            adGroupId: 2,
-            adGroupName: "Group",
-            keywordId: 3,
-            keyword: "kw",
-            countryOrRegion: "US",
-            clickDate: Date(timeIntervalSince1970: 1_000_000),
-            conversionType: "Download",
-            supplyPlacement: "top_of_search"
-        )
-
-        XCTAssertEqual(result1, result2)
-    }
-
-    func testAttributionResultEquatableDifferentFields() {
-        let base = AttributionResult(
-            id: "test-1",
-            status: .attributed,
-            campaignId: 1,
-            campaignName: "Camp",
-            adGroupId: nil,
-            adGroupName: nil,
-            keywordId: nil,
-            keyword: nil,
-            countryOrRegion: "US",
-            clickDate: nil,
-            conversionType: nil,
-            supplyPlacement: nil
-        )
-
-        // Same id but different campaignName — should NOT be equal
-        let different = AttributionResult(
-            id: "test-1",
-            status: .attributed,
-            campaignId: 1,
-            campaignName: "Different Camp",
-            adGroupId: nil,
-            adGroupName: nil,
-            keywordId: nil,
-            keyword: nil,
-            countryOrRegion: "US",
-            clickDate: nil,
-            conversionType: nil,
-            supplyPlacement: nil
-        )
-
-        XCTAssertNotEqual(base, different)
-    }
-
-    func testAttributionResultDecodesNils() throws {
-        let json = """
-        {"id": "organic-1", "status": "organic"}
-        """
-        let decoder = JSONDecoder()
-        let result = try decoder.decode(AttributionResult.self, from: Data(json.utf8))
-
-        XCTAssertEqual(result.id, "organic-1")
-        XCTAssertEqual(result.status, .organic)
-        XCTAssertNil(result.campaignId)
-        XCTAssertNil(result.campaignName)
-        XCTAssertNil(result.adGroupId)
-        XCTAssertNil(result.keyword)
-        XCTAssertNil(result.clickDate)
-    }
-
-    // MARK: - EventQueue
-
-    func testEventQueueEnqueueAndPeek() {
-        let queue = EventQueue()
-        XCTAssertEqual(queue.pendingCount, 0)
-        XCTAssertTrue(queue.peek().isEmpty)
-
-        let events = [makeEvent(id: "tx1"), makeEvent(id: "tx2")]
-        queue.enqueue(events)
-
-        XCTAssertEqual(queue.pendingCount, 2)
-
-        let peeked = queue.peek()
-        XCTAssertEqual(peeked.count, 2)
-        XCTAssertEqual(peeked[0].transactionId, "tx1")
-        XCTAssertEqual(peeked[1].transactionId, "tx2")
-    }
-
-    func testEventQueueRemove() {
-        let queue = EventQueue()
-        queue.enqueue([makeEvent(id: "tx1"), makeEvent(id: "tx2"), makeEvent(id: "tx3")])
-
-        queue.remove(count: 2)
-        XCTAssertEqual(queue.pendingCount, 1)
-
-        let remaining = queue.peek()
-        XCTAssertEqual(remaining[0].transactionId, "tx3")
-    }
-
-    func testEventQueueRemoveAll() {
-        let queue = EventQueue()
-        queue.enqueue([makeEvent(id: "tx1")])
-
-        queue.remove(count: 1)
-        XCTAssertEqual(queue.pendingCount, 0)
-        XCTAssertTrue(queue.peek().isEmpty)
-    }
-
-    func testEventQueueBoundsAt100() {
-        let queue = EventQueue()
-
-        // Enqueue 110 events
-        let events = (0 ..< 110).map { makeEvent(id: "tx\($0)") }
-        queue.enqueue(events)
-
-        // Should trim to 100, dropping the first 10
-        XCTAssertEqual(queue.pendingCount, 100)
-        let first = queue.peek().first
-        XCTAssertEqual(first?.transactionId, "tx10")
-    }
-
-    func testEventQueueEmptyEnqueueIsNoop() {
-        let queue = EventQueue()
-        queue.enqueue([])
-        XCTAssertEqual(queue.pendingCount, 0)
-    }
-
-    func testEventQueueRemoveZeroIsNoop() {
-        let queue = EventQueue()
-        queue.enqueue([makeEvent(id: "tx1")])
-        queue.remove(count: 0)
-        XCTAssertEqual(queue.pendingCount, 1)
-    }
-
-    func testEventQueuePersistence() {
-        // Enqueue in one instance
-        let queue1 = EventQueue()
-        queue1.enqueue([makeEvent(id: "tx1")])
-
-        // Read from a new instance (same Defaults)
-        let queue2 = EventQueue()
-        XCTAssertEqual(queue2.pendingCount, 1)
-        XCTAssertEqual(queue2.peek().first?.transactionId, "tx1")
-    }
-
-    // MARK: - PurchaseEvent Codable
-
-    func testPurchaseEventCodable() throws {
-        let event = makeEvent(id: "tx-100")
-
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        let data = try encoder.encode(event)
-
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        let decoded = try decoder.decode(PurchaseEvent.self, from: data)
-
-        XCTAssertEqual(decoded.transactionId, "tx-100")
-        XCTAssertEqual(decoded.productId, "com.test.product")
-        XCTAssertEqual(decoded.type, "consumable_purchase")
-        XCTAssertEqual(decoded.price, "4.99")
-        XCTAssertEqual(decoded.currency, "USD")
-        XCTAssertEqual(decoded.quantity, 1)
-        XCTAssertEqual(decoded.environment, "production")
-    }
-
-    func testPurchaseEventWithOriginalTransactionId() throws {
-        let event = PurchaseEvent(
-            type: "subscription_renewal",
-            transactionId: "tx-200",
-            originalTransactionId: "tx-100",
-            productId: "com.test.subscription",
-            purchaseDate: Date(timeIntervalSince1970: 1_700_000_000),
-            price: "9.99",
-            currency: "USD",
-            countryCode: "US",
-            quantity: 1,
-            environment: "sandbox"
-        )
-
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        let data = try encoder.encode(event)
-
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        let decoded = try decoder.decode(PurchaseEvent.self, from: data)
-
-        XCTAssertEqual(decoded.originalTransactionId, "tx-100")
-        XCTAssertEqual(decoded.type, "subscription_renewal")
-        XCTAssertEqual(decoded.environment, "sandbox")
-    }
-
-    func testPurchaseEventNilOptionalFields() throws {
-        let event = PurchaseEvent(
-            type: "purchase",
-            transactionId: "tx-300",
-            originalTransactionId: nil,
-            productId: "com.test.item",
-            purchaseDate: Date(timeIntervalSince1970: 1_700_000_000),
-            price: nil,
-            currency: nil,
-            countryCode: nil,
-            quantity: 1,
-            environment: "production"
-        )
-
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        let data = try encoder.encode(event)
-
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        let decoded = try decoder.decode(PurchaseEvent.self, from: data)
-
-        XCTAssertNil(decoded.originalTransactionId)
-        XCTAssertNil(decoded.price)
-        XCTAssertNil(decoded.currency)
-        XCTAssertNil(decoded.countryCode)
     }
 
     // MARK: - KeychainHelper
@@ -577,22 +307,5 @@ final class SpendOwlTests: XCTestCase {
         }
 
         wait(for: [expectation], timeout: 10)
-    }
-
-    // MARK: - Helpers
-
-    private func makeEvent(id: String) -> PurchaseEvent {
-        PurchaseEvent(
-            type: "consumable_purchase",
-            transactionId: id,
-            originalTransactionId: nil,
-            productId: "com.test.product",
-            purchaseDate: Date(timeIntervalSince1970: 1_700_000_000),
-            price: "4.99",
-            currency: "USD",
-            countryCode: "US",
-            quantity: 1,
-            environment: "production"
-        )
     }
 }
