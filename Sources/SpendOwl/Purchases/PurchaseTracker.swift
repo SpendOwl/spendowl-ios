@@ -14,9 +14,12 @@ import StoreKit
 /// Uses three complementary listeners to capture every purchase:
 /// 1. `SKPaymentTransactionObserver` — catches the first purchase in the same session
 /// 2. `Transaction.updates` — catches renewals, cross-device, Ask to Buy, offer codes
-/// 3. `Transaction.currentEntitlements` — startup safety net for missed purchases
+/// 3. `Transaction.all` — startup safety net for missed purchases (incl. consumables,
+///    which `currentEntitlements` omits by design)
 ///
-/// Deduplication is handled atomically via `sentTransactionIds` (transactionId-based).
+/// Deduplication is atomic and transactionId-based: the persisted `sentTransactionIds`
+/// (confirmed sends) combined with an in-memory pending set, so events dropped from the
+/// bounded queue before sending are recovered on a later launch rather than lost.
 /// The SDK is fully read-only: neither `transaction.finish()` nor `finishTransaction()` is called.
 @available(iOS 15.0, macOS 12.0, *)
 final class PurchaseTracker: NSObject, SKPaymentTransactionObserver, @unchecked Sendable {
@@ -30,12 +33,22 @@ final class PurchaseTracker: NSObject, SKPaymentTransactionObserver, @unchecked 
     private var updateTask: Task<Void, Never>?
     private var _userId: String?
     private var _isSending = false
+    /// Transaction IDs enqueued this session but not yet confirmed sent. Combined with the
+    /// persisted `sentTransactionIds` (confirmed-sent only) for dedup, so a transaction
+    /// evicted from the bounded `EventQueue` before sending is re-enqueued on a future
+    /// launch instead of being permanently dropped. Guarded by `lock`.
+    private var _pendingTransactionIds: Set<String> = []
 
     // MARK: - Initialization
 
     init(apiClient: APIClient) {
         self.apiClient = apiClient
-        eventQueue = EventQueue()
+        let queue = EventQueue()
+        eventQueue = queue
+        // Seed the in-memory pending set from events a prior launch persisted but never sent,
+        // so the recovery scan doesn't enqueue duplicates of transactions already queued.
+        // Evicted (dropped) events are absent from the queue, so they stay recoverable.
+        _pendingTransactionIds = Set(queue.peek().map(\.transactionId))
         super.init()
     }
 
@@ -53,7 +66,7 @@ final class PurchaseTracker: NSObject, SKPaymentTransactionObserver, @unchecked 
     /// Starts fully automatic purchase tracking.
     ///
     /// 1. Registers `SKPaymentTransactionObserver` (sync — immediately active)
-    /// 2. Flushes pending events and scans `currentEntitlements` (async)
+    /// 2. Flushes pending events and scans `Transaction.all` (async)
     /// 3. Starts `Transaction.updates` listener (async, long-running)
     func startObserving() {
         lock.lock()
@@ -67,7 +80,7 @@ final class PurchaseTracker: NSObject, SKPaymentTransactionObserver, @unchecked 
         scanTask = Task { [weak self] in
             guard let self else { return }
             await sendEnqueuedEvents()
-            await scanCurrentEntitlements()
+            await scanAllTransactions()
         }
 
         // StoreKit 2 listener — catches renewals, cross-device, Ask to Buy, offer codes
@@ -200,23 +213,43 @@ final class PurchaseTracker: NSObject, SKPaymentTransactionObserver, @unchecked 
         return true
     }
 
-    // MARK: - Current Entitlements Scan
+    // MARK: - Transaction History Scan
 
-    /// Scans `Transaction.currentEntitlements` as a safety net for missed purchases.
-    /// Batches all new events, then sends once to avoid per-entitlement network calls.
-    private func scanCurrentEntitlements() async {
-        Logger.log("Scanning current entitlements", level: .debug)
+    /// Number of new transactions to accumulate before flushing mid-scan. Keeps the
+    /// persistent `EventQueue` (capped at 100) from overflowing on large histories.
+    private static let scanFlushBatchSize = 50
+
+    /// Scans `Transaction.all` as a safety net for missed purchases.
+    ///
+    /// Unlike `currentEntitlements`, `Transaction.all` returns the customer's full
+    /// transaction history — **including consumables** (which `currentEntitlements`
+    /// excludes by design). Refunded/revoked entries are also included but harmless:
+    /// the SDK only sends the attribution↔transaction link, never price or revocation
+    /// state (those arrive via App Store Server Notifications on the backend).
+    ///
+    /// New events are batched and flushed every ``scanFlushBatchSize`` transactions so
+    /// the bounded `EventQueue` never overflows on long-lived customers; a final flush
+    /// drains the remainder. Dedup via `sentTransactionIds` makes re-emitting history on
+    /// each launch cheap and the backend is idempotent.
+    private func scanAllTransactions() async {
+        Logger.log("Scanning transaction history", level: .debug)
         var count = 0
-        for await result in Transaction.currentEntitlements {
+        for await result in Transaction.all {
             switch result {
             case let .verified(transaction):
-                if enqueueTransaction(transaction) { count += 1 }
+                if enqueueTransaction(transaction) {
+                    count += 1
+                    // Flush periodically so a large backlog never overflows the queue.
+                    if count.isMultiple(of: Self.scanFlushBatchSize) {
+                        await sendEnqueuedEvents()
+                    }
+                }
             case let .unverified(_, error):
                 Logger.log("Unverified transaction: \(error)", level: .error)
             }
         }
         if count > 0 {
-            Logger.log("Scanned \(count) new entitlement(s), sending batch", level: .debug)
+            Logger.log("Scanned \(count) new transaction(s), sending batch", level: .debug)
             await sendEnqueuedEvents()
         }
     }
@@ -249,6 +282,7 @@ final class PurchaseTracker: NSObject, SKPaymentTransactionObserver, @unchecked 
             do {
                 let response = try await apiClient.sendEvents(request)
                 eventQueue.remove(count: pending.count)
+                markSent(pending.map(\.transactionId))
                 Logger.log("Sent \(response.processed) purchase event(s)", level: .debug)
                 // Loop back to check for newly enqueued events
             } catch {
@@ -276,24 +310,45 @@ final class PurchaseTracker: NSObject, SKPaymentTransactionObserver, @unchecked 
 
     // MARK: - Helpers
 
-    /// Atomic dedup: returns `true` if the transaction is new and was marked.
-    /// Returns `false` if already sent. The 1000-cap evicts an arbitrary ID
-    /// (but never the newly inserted one) to prevent unbounded growth.
-    /// Duplicates from eviction are harmless — the backend is idempotent.
+    /// Atomic dedup: returns `true` if the transaction is new (not already sent or queued
+    /// this session) and records it as pending; returns `false` otherwise.
+    ///
+    /// A transaction is "already handled" if it's in the persisted `sentTransactionIds`
+    /// (confirmed sent) or the in-memory `_pendingTransactionIds` (enqueued this session
+    /// but not yet sent). IDs are only persisted as sent after a successful network send
+    /// (see ``markSent(_:)``), so an event evicted from the bounded `EventQueue` before
+    /// sending is recovered on the next launch instead of being permanently dropped.
     private func markTransactionIfNew(_ transactionId: String) -> Bool {
         lock.lock()
         defer { lock.unlock() }
-        var sentIds = defaults.sentTransactionIds
-        if sentIds.contains(transactionId) {
-            Logger.log("Transaction already sent: \(transactionId)", level: .debug)
+        if defaults.sentTransactionIds.contains(transactionId)
+            || _pendingTransactionIds.contains(transactionId)
+        {
+            Logger.log("Transaction already handled: \(transactionId)", level: .debug)
             return false
         }
-        sentIds.insert(transactionId)
-        if sentIds.count > 1000, let oldest = sentIds.first(where: { $0 != transactionId }) {
-            sentIds.remove(oldest)
+        _pendingTransactionIds.insert(transactionId)
+        return true
+    }
+
+    /// Persists transaction IDs as confirmed-sent after a successful network send and
+    /// clears them from the in-memory pending set. The 1000-cap evicts arbitrary older
+    /// IDs (never the just-sent ones) to bound storage; re-sending an evicted transaction
+    /// later is harmless because the backend is idempotent.
+    private func markSent(_ transactionIds: [String]) {
+        guard !transactionIds.isEmpty else { return }
+        lock.lock()
+        defer { lock.unlock() }
+        var sentIds = defaults.sentTransactionIds
+        let justSent = Set(transactionIds)
+        for id in transactionIds {
+            sentIds.insert(id)
+            _pendingTransactionIds.remove(id)
+        }
+        while sentIds.count > 1000, let evictable = sentIds.first(where: { !justSent.contains($0) }) {
+            sentIds.remove(evictable)
         }
         defaults.sentTransactionIds = sentIds
-        return true
     }
 
     private func resolveUserId() -> String {
@@ -325,3 +380,46 @@ final class PurchaseTracker: NSObject, SKPaymentTransactionObserver, @unchecked 
         return "production"
     }
 }
+
+#if DEBUG
+    /// Test seams for deterministic verification of the dedup / mark-on-send / recovery logic
+    /// without StoreKit. Compiled out of release builds. Lives in the same file so it can reach
+    /// the private dedup and send internals.
+    @available(iOS 15.0, macOS 12.0, *)
+    extension PurchaseTracker {
+        /// Enqueues a synthetic purchase through the real dedup + queue path (no StoreKit).
+        /// Returns `true` if newly enqueued (not already sent or pending this session).
+        func enqueueForTesting(transactionId: String, productId: String = "test.product") -> Bool {
+            guard markTransactionIfNew(transactionId) else { return false }
+            let event = PurchaseEvent(
+                type: "purchase",
+                transactionId: transactionId,
+                originalTransactionId: nil,
+                productId: productId,
+                purchaseDate: Date(timeIntervalSince1970: 0),
+                price: nil,
+                currency: nil,
+                countryCode: nil,
+                quantity: 1,
+                environment: "sandbox"
+            )
+            eventQueue.enqueue([event])
+            return true
+        }
+
+        /// Runs the send loop and awaits completion (a real network attempt).
+        func flushForTesting() async {
+            await sendEnqueuedEvents()
+        }
+
+        /// Marks ids as confirmed-sent, simulating a successful network send.
+        func markSentForTesting(_ transactionIds: [String]) {
+            markSent(transactionIds)
+        }
+
+        /// Current depth of the persistent event queue.
+        var pendingCountForTesting: Int {
+            eventQueue.pendingCount
+        }
+    }
+#endif
