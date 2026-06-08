@@ -9,4 +9,4 @@
 /// Single source of truth for the SDK version.
 ///
 /// Update this value when cutting a new release. Keep in sync with the git tag.
-let spendOwlVersion = "1.2.0"
+let spendOwlVersion = "1.2.1"
