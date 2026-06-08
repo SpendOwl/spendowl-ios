@@ -88,6 +88,25 @@ final class PurchaseTrackerTests: XCTestCase {
         )
     }
 
+    /// A transaction still in the persisted queue from a prior launch must not be
+    /// re-enqueued as a duplicate by the next launch's recovery scan.
+    func testPersistedQueuedTransactionIsNotDuplicatedNextLaunch() async {
+        let first = makeTracker()
+        XCTAssertTrue(first.enqueueForTesting(transactionId: "tx-queued"))
+        await first.flushForTesting() // fails: tx-queued stays in the persisted queue, unsent
+        XCTAssertEqual(first.pendingCountForTesting, 1)
+        XCTAssertFalse(Defaults.shared.sentTransactionIds.contains("tx-queued"))
+
+        // Next launch: a fresh tracker seeds its pending set from the persisted queue, so the
+        // same id is recognised as already queued and is not enqueued a second time.
+        let next = makeTracker()
+        XCTAssertFalse(
+            next.enqueueForTesting(transactionId: "tx-queued"),
+            "a transaction already in the persisted queue must not be enqueued twice"
+        )
+        XCTAssertEqual(next.pendingCountForTesting, 1, "the queue must still hold exactly one copy")
+    }
+
     // MARK: - Helpers
 
     private func makeTracker() -> PurchaseTracker {

@@ -43,7 +43,12 @@ final class PurchaseTracker: NSObject, SKPaymentTransactionObserver, @unchecked 
 
     init(apiClient: APIClient) {
         self.apiClient = apiClient
-        eventQueue = EventQueue()
+        let queue = EventQueue()
+        eventQueue = queue
+        // Seed the in-memory pending set from events a prior launch persisted but never sent,
+        // so the recovery scan doesn't enqueue duplicates of transactions already queued.
+        // Evicted (dropped) events are absent from the queue, so they stay recoverable.
+        _pendingTransactionIds = Set(queue.peek().map(\.transactionId))
         super.init()
     }
 
