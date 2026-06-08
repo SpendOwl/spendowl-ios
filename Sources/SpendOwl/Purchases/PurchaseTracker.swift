@@ -17,7 +17,9 @@ import StoreKit
 /// 3. `Transaction.all` — startup safety net for missed purchases (incl. consumables,
 ///    which `currentEntitlements` omits by design)
 ///
-/// Deduplication is handled atomically via `sentTransactionIds` (transactionId-based).
+/// Deduplication is atomic and transactionId-based: the persisted `sentTransactionIds`
+/// (confirmed sends) combined with an in-memory pending set, so events dropped from the
+/// bounded queue before sending are recovered on a later launch rather than lost.
 /// The SDK is fully read-only: neither `transaction.finish()` nor `finishTransaction()` is called.
 @available(iOS 15.0, macOS 12.0, *)
 final class PurchaseTracker: NSObject, SKPaymentTransactionObserver, @unchecked Sendable {
@@ -31,6 +33,11 @@ final class PurchaseTracker: NSObject, SKPaymentTransactionObserver, @unchecked 
     private var updateTask: Task<Void, Never>?
     private var _userId: String?
     private var _isSending = false
+    /// Transaction IDs enqueued this session but not yet confirmed sent. Combined with the
+    /// persisted `sentTransactionIds` (confirmed-sent only) for dedup, so a transaction
+    /// evicted from the bounded `EventQueue` before sending is re-enqueued on a future
+    /// launch instead of being permanently dropped. Guarded by `lock`.
+    private var _pendingTransactionIds: Set<String> = []
 
     // MARK: - Initialization
 
@@ -270,6 +277,7 @@ final class PurchaseTracker: NSObject, SKPaymentTransactionObserver, @unchecked 
             do {
                 let response = try await apiClient.sendEvents(request)
                 eventQueue.remove(count: pending.count)
+                markSent(pending.map(\.transactionId))
                 Logger.log("Sent \(response.processed) purchase event(s)", level: .debug)
                 // Loop back to check for newly enqueued events
             } catch {
@@ -297,24 +305,45 @@ final class PurchaseTracker: NSObject, SKPaymentTransactionObserver, @unchecked 
 
     // MARK: - Helpers
 
-    /// Atomic dedup: returns `true` if the transaction is new and was marked.
-    /// Returns `false` if already sent. The 1000-cap evicts an arbitrary ID
-    /// (but never the newly inserted one) to prevent unbounded growth.
-    /// Duplicates from eviction are harmless — the backend is idempotent.
+    /// Atomic dedup: returns `true` if the transaction is new (not already sent or queued
+    /// this session) and records it as pending; returns `false` otherwise.
+    ///
+    /// A transaction is "already handled" if it's in the persisted `sentTransactionIds`
+    /// (confirmed sent) or the in-memory `_pendingTransactionIds` (enqueued this session
+    /// but not yet sent). IDs are only persisted as sent after a successful network send
+    /// (see ``markSent(_:)``), so an event evicted from the bounded `EventQueue` before
+    /// sending is recovered on the next launch instead of being permanently dropped.
     private func markTransactionIfNew(_ transactionId: String) -> Bool {
         lock.lock()
         defer { lock.unlock() }
-        var sentIds = defaults.sentTransactionIds
-        if sentIds.contains(transactionId) {
-            Logger.log("Transaction already sent: \(transactionId)", level: .debug)
+        if defaults.sentTransactionIds.contains(transactionId)
+            || _pendingTransactionIds.contains(transactionId)
+        {
+            Logger.log("Transaction already handled: \(transactionId)", level: .debug)
             return false
         }
-        sentIds.insert(transactionId)
-        if sentIds.count > 1000, let oldest = sentIds.first(where: { $0 != transactionId }) {
-            sentIds.remove(oldest)
+        _pendingTransactionIds.insert(transactionId)
+        return true
+    }
+
+    /// Persists transaction IDs as confirmed-sent after a successful network send and
+    /// clears them from the in-memory pending set. The 1000-cap evicts arbitrary older
+    /// IDs (never the just-sent ones) to bound storage; re-sending an evicted transaction
+    /// later is harmless because the backend is idempotent.
+    private func markSent(_ transactionIds: [String]) {
+        guard !transactionIds.isEmpty else { return }
+        lock.lock()
+        defer { lock.unlock() }
+        var sentIds = defaults.sentTransactionIds
+        let justSent = Set(transactionIds)
+        for id in transactionIds {
+            sentIds.insert(id)
+            _pendingTransactionIds.remove(id)
+        }
+        while sentIds.count > 1000, let evictable = sentIds.first(where: { !justSent.contains($0) }) {
+            sentIds.remove(evictable)
         }
         defaults.sentTransactionIds = sentIds
-        return true
     }
 
     private func resolveUserId() -> String {
