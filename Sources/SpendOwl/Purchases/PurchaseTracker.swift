@@ -375,3 +375,46 @@ final class PurchaseTracker: NSObject, SKPaymentTransactionObserver, @unchecked 
         return "production"
     }
 }
+
+#if DEBUG
+    /// Test seams for deterministic verification of the dedup / mark-on-send / recovery logic
+    /// without StoreKit. Compiled out of release builds. Lives in the same file so it can reach
+    /// the private dedup and send internals.
+    @available(iOS 15.0, macOS 12.0, *)
+    extension PurchaseTracker {
+        /// Enqueues a synthetic purchase through the real dedup + queue path (no StoreKit).
+        /// Returns `true` if newly enqueued (not already sent or pending this session).
+        func enqueueForTesting(transactionId: String, productId: String = "test.product") -> Bool {
+            guard markTransactionIfNew(transactionId) else { return false }
+            let event = PurchaseEvent(
+                type: "purchase",
+                transactionId: transactionId,
+                originalTransactionId: nil,
+                productId: productId,
+                purchaseDate: Date(timeIntervalSince1970: 0),
+                price: nil,
+                currency: nil,
+                countryCode: nil,
+                quantity: 1,
+                environment: "sandbox"
+            )
+            eventQueue.enqueue([event])
+            return true
+        }
+
+        /// Runs the send loop and awaits completion (a real network attempt).
+        func flushForTesting() async {
+            await sendEnqueuedEvents()
+        }
+
+        /// Marks ids as confirmed-sent, simulating a successful network send.
+        func markSentForTesting(_ transactionIds: [String]) {
+            markSent(transactionIds)
+        }
+
+        /// Current depth of the persistent event queue.
+        var pendingCountForTesting: Int {
+            eventQueue.pendingCount
+        }
+    }
+#endif
