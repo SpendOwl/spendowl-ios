@@ -14,7 +14,8 @@ import StoreKit
 /// Uses three complementary listeners to capture every purchase:
 /// 1. `SKPaymentTransactionObserver` — catches the first purchase in the same session
 /// 2. `Transaction.updates` — catches renewals, cross-device, Ask to Buy, offer codes
-/// 3. `Transaction.currentEntitlements` — startup safety net for missed purchases
+/// 3. `Transaction.all` — startup safety net for missed purchases (incl. consumables,
+///    which `currentEntitlements` omits by design)
 ///
 /// Deduplication is handled atomically via `sentTransactionIds` (transactionId-based).
 /// The SDK is fully read-only: neither `transaction.finish()` nor `finishTransaction()` is called.
@@ -53,7 +54,7 @@ final class PurchaseTracker: NSObject, SKPaymentTransactionObserver, @unchecked 
     /// Starts fully automatic purchase tracking.
     ///
     /// 1. Registers `SKPaymentTransactionObserver` (sync — immediately active)
-    /// 2. Flushes pending events and scans `currentEntitlements` (async)
+    /// 2. Flushes pending events and scans `Transaction.all` (async)
     /// 3. Starts `Transaction.updates` listener (async, long-running)
     func startObserving() {
         lock.lock()
@@ -67,7 +68,7 @@ final class PurchaseTracker: NSObject, SKPaymentTransactionObserver, @unchecked 
         scanTask = Task { [weak self] in
             guard let self else { return }
             await sendEnqueuedEvents()
-            await scanCurrentEntitlements()
+            await scanAllTransactions()
         }
 
         // StoreKit 2 listener — catches renewals, cross-device, Ask to Buy, offer codes
@@ -200,23 +201,43 @@ final class PurchaseTracker: NSObject, SKPaymentTransactionObserver, @unchecked 
         return true
     }
 
-    // MARK: - Current Entitlements Scan
+    // MARK: - Transaction History Scan
 
-    /// Scans `Transaction.currentEntitlements` as a safety net for missed purchases.
-    /// Batches all new events, then sends once to avoid per-entitlement network calls.
-    private func scanCurrentEntitlements() async {
-        Logger.log("Scanning current entitlements", level: .debug)
+    /// Number of new transactions to accumulate before flushing mid-scan. Keeps the
+    /// persistent `EventQueue` (capped at 100) from overflowing on large histories.
+    private static let scanFlushBatchSize = 50
+
+    /// Scans `Transaction.all` as a safety net for missed purchases.
+    ///
+    /// Unlike `currentEntitlements`, `Transaction.all` returns the customer's full
+    /// transaction history — **including consumables** (which `currentEntitlements`
+    /// excludes by design). Refunded/revoked entries are also included but harmless:
+    /// the SDK only sends the attribution↔transaction link, never price or revocation
+    /// state (those arrive via App Store Server Notifications on the backend).
+    ///
+    /// New events are batched and flushed every ``scanFlushBatchSize`` transactions so
+    /// the bounded `EventQueue` never overflows on long-lived customers; a final flush
+    /// drains the remainder. Dedup via `sentTransactionIds` makes re-emitting history on
+    /// each launch cheap and the backend is idempotent.
+    private func scanAllTransactions() async {
+        Logger.log("Scanning transaction history", level: .debug)
         var count = 0
-        for await result in Transaction.currentEntitlements {
+        for await result in Transaction.all {
             switch result {
             case let .verified(transaction):
-                if enqueueTransaction(transaction) { count += 1 }
+                if enqueueTransaction(transaction) {
+                    count += 1
+                    // Flush periodically so a large backlog never overflows the queue.
+                    if count.isMultiple(of: Self.scanFlushBatchSize) {
+                        await sendEnqueuedEvents()
+                    }
+                }
             case let .unverified(_, error):
                 Logger.log("Unverified transaction: \(error)", level: .error)
             }
         }
         if count > 0 {
-            Logger.log("Scanned \(count) new entitlement(s), sending batch", level: .debug)
+            Logger.log("Scanned \(count) new transaction(s), sending batch", level: .debug)
             await sendEnqueuedEvents()
         }
     }
