@@ -212,6 +212,43 @@ final class AttributionTests: XCTestCase {
         XCTAssertEqual(decoded, pending)
     }
 
+    func testPendingAttributionDecodesLegacyWithoutExternalUserId() throws {
+        // A payload persisted by an older SDK has no externalUserId field; the
+        // optional must decode to nil rather than failing.
+        let legacy = Data("""
+        {"attributionToken":"t","bundleId":"com.test.app","appVersion":"1.0.0",\
+        "sdkVersion":"1.2.0","userId":"user-1","osVersion":"17.0.0",\
+        "deviceModel":"iPhone16,1","locale":"en_US",\
+        "createdAt":"2023-11-14T22:13:20Z"}
+        """.utf8)
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let decoded = try decoder.decode(PendingAttribution.self, from: legacy)
+
+        XCTAssertNil(decoded.externalUserId)
+        XCTAssertEqual(decoded.userId, "user-1")
+    }
+
+    // MARK: - AttributionService External User ID
+
+    func testFetchAttributionSendsAnonymousLinkageAndExternalId() async throws {
+        let captured = CapturedRequest()
+        let service = makeServiceFor(
+            tokenProvider: { "tok" },
+            sender: { request in
+                captured.set(request)
+                return self.makeStubResult(id: "s1", status: .attributed)
+            }
+        )
+
+        _ = try await service.fetchAttribution(userId: "anon-1", externalUserId: "dev-1")
+
+        // Linkage id is sent as userId; the developer id rides along separately.
+        XCTAssertEqual(captured.value?.userId, "anon-1")
+        XCTAssertEqual(captured.value?.externalUserId, "dev-1")
+    }
+
     // MARK: - AttributionService Token Retry
 
     func testTokenRetrySucceedsOnSecondAttempt() async {
@@ -342,6 +379,7 @@ final class AttributionTests: XCTestCase {
             appVersion: "1.0.0",
             sdkVersion: "1.2.0",
             userId: "user-1",
+            externalUserId: "ext-user-1",
             osVersion: "17.0.0",
             deviceModel: "iPhone16,1",
             locale: "en_US",
@@ -387,6 +425,25 @@ final class AttributionTests: XCTestCase {
             tokenProvider: tokenProvider,
             sender: sender
         )
+    }
+}
+
+/// Thread-safe holder that captures the request passed to the sender closure.
+@available(iOS 15.0, macOS 12.0, *)
+private final class CapturedRequest: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _value: AttributionRequest?
+
+    var value: AttributionRequest? {
+        lock.lock()
+        defer { lock.unlock() }
+        return _value
+    }
+
+    func set(_ request: AttributionRequest) {
+        lock.lock()
+        defer { lock.unlock() }
+        _value = request
     }
 }
 

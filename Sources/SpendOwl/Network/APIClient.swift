@@ -148,7 +148,12 @@ struct AttributionRequest: Encodable {
     let bundleId: String
     let appVersion: String
     let sdkVersion: String
+    /// Stable device-scoped linkage identity (the SpendOwl anonymous ID). Always
+    /// present — used to join attribution to purchases/revenue server-side.
     let userId: String?
+    /// Optional developer-supplied identifier (`SpendOwl.setUserId`). Stored as an
+    /// additional attribute for reporting/search; never used as the join key.
+    let externalUserId: String?
     let deviceInfo: DeviceInfo
 }
 
@@ -162,7 +167,12 @@ struct DeviceInfo: Encodable {
 /// Request payload for purchase events.
 struct EventsRequest: Encodable {
     let events: [PurchaseEvent]
+    /// Stable device-scoped linkage identity (the SpendOwl anonymous ID). Always
+    /// present — matched server-side to the same user's attribution.
     let userId: String?
+    /// Optional developer-supplied identifier (`SpendOwl.setUserId`). Reporting
+    /// metadata only; never used to match purchases to attribution.
+    let externalUserId: String?
     let bundleId: String
 }
 

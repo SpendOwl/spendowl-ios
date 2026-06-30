@@ -137,7 +137,10 @@ public final class SpendOwl: @unchecked Sendable {
     private var apiClient: APIClient?
     private var attributionService: AttributionService?
     private var purchaseTracker: PurchaseTracker?
-    private var userId: String?
+    /// Optional developer-supplied identifier from ``setUserId(_:)``. Sent as
+    /// `externalUserId` metadata; never used as the attribution/purchase linkage
+    /// key (that is always the stable anonymous SpendOwl ID).
+    private var externalUserId: String?
 
     private let lock = NSLock()
 
@@ -215,10 +218,11 @@ public final class SpendOwl: @unchecked Sendable {
 
     // MARK: - User Identity
 
-    /// Sets the user ID for attribution and purchase tracking.
+    /// Associates your own user identifier with this device's events.
     ///
-    /// Call this after the user logs in or registers to associate attribution
-    /// and purchases with their account.
+    /// Call this after the user logs in or registers. The identifier is sent as
+    /// `externalUserId` metadata so you can later look this user up and see their
+    /// per-campaign performance (revenue, renewals) in the dashboard.
     ///
     /// ```swift
     /// // After successful login
@@ -226,14 +230,17 @@ public final class SpendOwl: @unchecked Sendable {
     /// ```
     ///
     /// - Parameter userId: Your internal user identifier (e.g., database ID, UUID).
-    /// - Note: The user ID is included with all subsequent attribution and purchase events.
+    /// - Note: This does NOT change how attribution and purchases are linked —
+    ///   that always uses a stable, device-scoped anonymous SpendOwl ID, so
+    ///   linkage works correctly even when you set this late (e.g. after login)
+    ///   or not at all. It is attached as additional reporting metadata only.
     public static func setUserId(_ userId: String) {
         shared.lock.lock()
-        shared.userId = userId
-        shared.purchaseTracker?.setUserId(userId)
+        shared.externalUserId = userId
+        shared.purchaseTracker?.setExternalUserId(userId)
         shared.lock.unlock()
 
-        Logger.log("User ID set: \(userId.prefix(8))...", level: .info)
+        Logger.log("External user ID set: \(userId.prefix(8))...", level: .info)
     }
 
     /// Clears the current user ID.
@@ -246,8 +253,8 @@ public final class SpendOwl: @unchecked Sendable {
     /// ```
     public static func clearUserId() {
         shared.lock.lock()
-        shared.userId = nil
-        shared.purchaseTracker?.setUserId(nil)
+        shared.externalUserId = nil
+        shared.purchaseTracker?.setExternalUserId(nil)
         shared.lock.unlock()
 
         Logger.log("User ID cleared", level: .info)
@@ -329,9 +336,15 @@ public final class SpendOwl: @unchecked Sendable {
             throw SpendOwlError.notConfigured
         }
 
-        // Always send a user ID - either developer-set or anonymous
-        let effectiveUserId = userId ?? KeychainHelper.shared.getOrCreateAnonymousId()
-        return try await service.fetchAttribution(userId: effectiveUserId)
+        // Linkage identity is ALWAYS the stable device-scoped anonymous ID, so
+        // attribution and purchases match regardless of if/when the developer
+        // sets a user ID. The developer-set ID rides along as externalUserId
+        // metadata only.
+        let linkageUserId = KeychainHelper.shared.getOrCreateAnonymousId()
+        return try await service.fetchAttribution(
+            userId: linkageUserId,
+            externalUserId: externalUserId
+        )
     }
 }
 

@@ -55,11 +55,16 @@ final class AttributionService: @unchecked Sendable {
     /// Retrieves attribution data from Apple and sends it to the SpendOwl backend.
     ///
     /// - Parameters:
-    ///   - userId: Optional user identifier to associate with the attribution.
+    ///   - userId: Stable device-scoped linkage identity (the anonymous SpendOwl ID).
+    ///   - externalUserId: Optional developer-supplied identifier (reporting metadata only).
     ///   - forceRefresh: If `true`, sends attribution even if already sent.
     /// - Returns: The attribution result from the backend.
     /// - Throws: `SpendOwlError` if attribution fails.
-    func fetchAttribution(userId: String?, forceRefresh: Bool = false) async throws -> AttributionResult {
+    func fetchAttribution(
+        userId: String?,
+        externalUserId: String? = nil,
+        forceRefresh: Bool = false
+    ) async throws -> AttributionResult {
         // First, replay any pending attribution from a prior launch. If it
         // succeeds we're done — the install is recorded, regardless of whether
         // the developer explicitly asked for a fresh result.
@@ -91,6 +96,7 @@ final class AttributionService: @unchecked Sendable {
             appVersion: appVersion,
             sdkVersion: SpendOwl.sdkVersion,
             userId: userId,
+            externalUserId: externalUserId,
             deviceInfo: info
         )
 
@@ -102,6 +108,7 @@ final class AttributionService: @unchecked Sendable {
             appVersion: appVersion,
             sdkVersion: SpendOwl.sdkVersion,
             userId: userId,
+            externalUserId: externalUserId,
             osVersion: info.osVersion,
             deviceModel: info.model,
             locale: info.locale,
@@ -200,6 +207,7 @@ final class AttributionService: @unchecked Sendable {
             appVersion: pending.appVersion,
             sdkVersion: pending.sdkVersion,
             userId: pending.userId,
+            externalUserId: pending.externalUserId,
             deviceInfo: DeviceInfo(
                 osVersion: pending.osVersion,
                 model: pending.deviceModel,
