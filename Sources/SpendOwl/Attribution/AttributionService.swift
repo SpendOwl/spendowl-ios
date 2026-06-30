@@ -55,15 +55,29 @@ final class AttributionService: @unchecked Sendable {
     /// Retrieves attribution data from Apple and sends it to the SpendOwl backend.
     ///
     /// - Parameters:
-    ///   - userId: Optional user identifier to associate with the attribution.
+    ///   - userId: Stable device-scoped linkage identity (the anonymous SpendOwl ID).
+    ///   - externalUserId: Optional developer-supplied identifier (reporting metadata only).
     ///   - forceRefresh: If `true`, sends attribution even if already sent.
     /// - Returns: The attribution result from the backend.
     /// - Throws: `SpendOwlError` if attribution fails.
-    func fetchAttribution(userId: String?, forceRefresh: Bool = false) async throws -> AttributionResult {
+    func fetchAttribution(
+        userId: String?,
+        externalUserId: String? = nil,
+        forceRefresh: Bool = false
+    ) async throws -> AttributionResult {
         // First, replay any pending attribution from a prior launch. If it
         // succeeds we're done — the install is recorded, regardless of whether
-        // the developer explicitly asked for a fresh result.
-        if !forceRefresh, let replayed = await replayPendingIfNeeded() {
+        // the developer explicitly asked for a fresh result. The current
+        // identity is applied on replay (not the persisted one) so the linkage
+        // userId is always the anonymous id — even for a pre-1.3 pending row
+        // saved under a developer id — and externalUserId reflects a login that
+        // happened after the payload was first persisted.
+        if !forceRefresh,
+           let replayed = await replayPendingIfNeeded(
+               userId: userId,
+               externalUserId: externalUserId
+           )
+        {
             return replayed
         }
 
@@ -91,6 +105,7 @@ final class AttributionService: @unchecked Sendable {
             appVersion: appVersion,
             sdkVersion: SpendOwl.sdkVersion,
             userId: userId,
+            externalUserId: externalUserId,
             deviceInfo: info
         )
 
@@ -102,6 +117,7 @@ final class AttributionService: @unchecked Sendable {
             appVersion: appVersion,
             sdkVersion: SpendOwl.sdkVersion,
             userId: userId,
+            externalUserId: externalUserId,
             osVersion: info.osVersion,
             deviceModel: info.model,
             locale: info.locale,
@@ -191,15 +207,23 @@ final class AttributionService: @unchecked Sendable {
     ///
     /// - Returns: The result from the backend on a successful replay, or `nil`
     ///   if there was no pending payload or the replay failed.
-    private func replayPendingIfNeeded() async -> AttributionResult? {
+    private func replayPendingIfNeeded(
+        userId: String?,
+        externalUserId: String?
+    ) async -> AttributionResult? {
         guard let pending = queue.load() else { return nil }
 
+        // Reuse the persisted token + device info (the original attribution),
+        // but apply the CURRENT identity: linkage userId is always the anonymous
+        // id, and externalUserId reflects the latest known developer id. Falls
+        // back to the persisted values if the caller passed none.
         let request = AttributionRequest(
             attributionToken: pending.attributionToken,
             bundleId: pending.bundleId,
             appVersion: pending.appVersion,
             sdkVersion: pending.sdkVersion,
-            userId: pending.userId,
+            userId: userId ?? pending.userId,
+            externalUserId: externalUserId ?? pending.externalUserId,
             deviceInfo: DeviceInfo(
                 osVersion: pending.osVersion,
                 model: pending.deviceModel,

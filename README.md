@@ -35,7 +35,9 @@ import SpendOwl
 // 1. Configure on app launch
 SpendOwl.configure(apiKey: "your-api-key")
 
-// 2. Set user ID (optional)
+// 2. Set your user ID (optional) — attaches your own identifier for reporting
+//    and lookups. Safe to call any time (e.g. after login); it does NOT affect
+//    how attribution and purchases are linked, so it works even when set late.
 SpendOwl.setUserId("user-123")
 
 // 3. That's it! Purchases are tracked automatically.

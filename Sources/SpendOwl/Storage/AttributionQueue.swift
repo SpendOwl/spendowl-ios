@@ -19,6 +19,9 @@ struct PendingAttribution: Codable, Equatable {
     let appVersion: String
     let sdkVersion: String
     let userId: String?
+    /// Optional developer-supplied identifier captured at enqueue time. Optional so
+    /// payloads persisted by older SDK versions decode with a nil value.
+    var externalUserId: String?
     let osVersion: String
     let deviceModel: String
     let locale: String

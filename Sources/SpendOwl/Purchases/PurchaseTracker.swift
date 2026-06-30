@@ -31,7 +31,7 @@ final class PurchaseTracker: NSObject, SKPaymentTransactionObserver, @unchecked 
     private let lock = NSLock()
     private var scanTask: Task<Void, Never>?
     private var updateTask: Task<Void, Never>?
-    private var _userId: String?
+    private var _externalUserId: String?
     private var _isSending = false
     /// Transaction IDs enqueued this session but not yet confirmed sent. Combined with the
     /// persisted `sentTransactionIds` (confirmed-sent only) for dedup, so a transaction
@@ -54,13 +54,14 @@ final class PurchaseTracker: NSObject, SKPaymentTransactionObserver, @unchecked 
 
     // MARK: - Public Methods
 
-    /// Sets the user ID for purchase attribution.
+    /// Sets the developer-supplied external user ID attached to purchase events
+    /// as reporting metadata. Does not affect linkage (always the anonymous ID).
     ///
-    /// - Parameter userId: The user ID to associate with purchases.
-    func setUserId(_ userId: String?) {
+    /// - Parameter externalUserId: The developer's user identifier, or `nil` to clear.
+    func setExternalUserId(_ externalUserId: String?) {
         lock.lock()
         defer { lock.unlock() }
-        _userId = userId
+        _externalUserId = externalUserId
     }
 
     /// Starts fully automatic purchase tracking.
@@ -271,11 +272,10 @@ final class PurchaseTracker: NSObject, SKPaymentTransactionObserver, @unchecked 
             let pending = eventQueue.peek()
             guard !pending.isEmpty else { return }
 
-            let effectiveUserId = resolveUserId()
-
             let request = EventsRequest(
                 events: pending,
-                userId: effectiveUserId,
+                userId: resolveLinkageUserId(),
+                externalUserId: resolveExternalUserId(),
                 bundleId: Bundle.main.bundleIdentifier ?? "unknown"
             )
 
@@ -351,11 +351,17 @@ final class PurchaseTracker: NSObject, SKPaymentTransactionObserver, @unchecked 
         defaults.sentTransactionIds = sentIds
     }
 
-    private func resolveUserId() -> String {
+    /// Stable device-scoped linkage identity — ALWAYS the anonymous SpendOwl ID,
+    /// so purchases match the install's attribution regardless of `setUserId`.
+    private func resolveLinkageUserId() -> String {
+        KeychainHelper.shared.getOrCreateAnonymousId()
+    }
+
+    /// Optional developer-supplied identifier (reporting metadata only), or `nil`.
+    private func resolveExternalUserId() -> String? {
         lock.lock()
-        let uid = _userId
-        lock.unlock()
-        return uid ?? KeychainHelper.shared.getOrCreateAnonymousId()
+        defer { lock.unlock() }
+        return _externalUserId
     }
 
     private func resolveEnvironmentFromReceipt() -> String {

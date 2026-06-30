@@ -50,6 +50,14 @@ public struct SpendOwlConfiguration: Sendable {
     /// Client errors (4xx) are not retried.
     public let maxRetries: Int
 
+    /// The default API base URL (`https://spendowl.io/api`).
+    public static let defaultBaseURL: URL = {
+        guard let url = URL(string: "https://spendowl.io/api") else {
+            preconditionFailure("Invalid default base URL")
+        }
+        return url
+    }()
+
     /// Creates a new SpendOwl configuration.
     ///
     /// - Parameters:
@@ -59,8 +67,7 @@ public struct SpendOwlConfiguration: Sendable {
     ///   - maxRetries: Maximum retry attempts for failed requests. Defaults to 3.
     public init(
         apiKey: String,
-        // swiftlint:disable:next force_unwrapping
-        baseURL: URL = URL(string: "https://spendowl.io/api")!,
+        baseURL: URL = Self.defaultBaseURL,
         timeoutInterval: TimeInterval = 10,
         maxRetries: Int = 3
     ) {
