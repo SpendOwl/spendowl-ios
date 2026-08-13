@@ -105,12 +105,22 @@ final class PurchaseTracker: NSObject, SKPaymentTransactionObserver, @unchecked 
     /// Stops purchase tracking.
     ///
     /// This is typically only called during testing or when the SDK is reset.
+    ///
+    /// Re-seeds the in-memory pending set from the persisted queue, exactly as `init`
+    /// does. IDs claimed by ``markTransactionIfNew(_:)`` but never confirmed sent — and
+    /// no longer queued, because the bounded queue evicted them — are released so a
+    /// restart in this same process can re-enqueue them instead of silently rejecting
+    /// them. IDs still in the queue stay deduped, so the restart cannot queue a second
+    /// copy. The `peek()` happens before `lock` is taken so the two locks never nest.
     func stopObserving() {
+        let stillQueued = Set(eventQueue.peek().map(\.transactionId))
+
         lock.lock()
         scanTask?.cancel()
         scanTask = nil
         updateTask?.cancel()
         updateTask = nil
+        _pendingTransactionIds = stillQueued
         lock.unlock()
 
         SKPaymentQueue.default().remove(self)
@@ -122,13 +132,30 @@ final class PurchaseTracker: NSObject, SKPaymentTransactionObserver, @unchecked 
 
     /// Called by StoreKit 1 for every transaction state change.
     ///
-    /// We only care about `.purchased` — the first purchase in the current session.
+    /// Only `.purchased` is recorded. The other states are deliberately ignored:
+    ///
+    /// - `.restored`: a restore re-delivers a purchase the customer already made, under a
+    ///   *new* transaction identifier. It produces no new revenue, and the underlying
+    ///   purchase reaches the backend through App Store Server Notifications plus the
+    ///   original purchase's own event. Recording it would emit a second purchase event
+    ///   for revenue that is already attributed, so we skip it by design rather than by
+    ///   omission. Revisit only if restores need to re-link attribution on a new device.
+    /// - `.purchasing` / `.deferred`: not yet a purchase; `.deferred` (Ask to Buy) arrives
+    ///   as `.purchased` once approved.
+    /// - `.failed`: no transaction to attribute.
+    ///
     /// `finishTransaction()` is never called (read-only SDK).
     func paymentQueue(_ queue: SKPaymentQueue, updatedTransactions transactions: [SKPaymentTransaction]) {
         for transaction in transactions where transaction.transactionState == .purchased {
             guard let transactionId = transaction.transactionIdentifier else { continue }
             recordStoreKit1Transaction(
                 transactionId: transactionId,
+                // Mirror StoreKit 2's `Transaction.originalID`, which equals the
+                // transaction's own id for an initial purchase and points at the
+                // original for a renewal. StoreKit 1 leaves `original` nil on an
+                // initial purchase, so fall back to the id to keep both paths
+                // joinable against `apple_webhooks.original_transaction_id`.
+                originalTransactionId: transaction.original?.transactionIdentifier ?? transactionId,
                 productId: transaction.payment.productIdentifier,
                 quantity: transaction.payment.quantity,
                 date: transaction.transactionDate ?? Date()
@@ -141,6 +168,7 @@ final class PurchaseTracker: NSObject, SKPaymentTransactionObserver, @unchecked 
     /// Records a purchase observed via `SKPaymentTransactionObserver`.
     private func recordStoreKit1Transaction(
         transactionId: String,
+        originalTransactionId: String?,
         productId: String,
         quantity: Int,
         date: Date
@@ -150,7 +178,7 @@ final class PurchaseTracker: NSObject, SKPaymentTransactionObserver, @unchecked 
         let event = PurchaseEvent(
             type: "purchase",
             transactionId: transactionId,
-            originalTransactionId: nil,
+            originalTransactionId: originalTransactionId,
             productId: productId,
             purchaseDate: date,
             price: nil,
@@ -421,6 +449,28 @@ final class PurchaseTracker: NSObject, SKPaymentTransactionObserver, @unchecked 
         /// Marks ids as confirmed-sent, simulating a successful network send.
         func markSentForTesting(_ transactionIds: [String]) {
             markSent(transactionIds)
+        }
+
+        /// Runs the real StoreKit 1 recording path with a synthetic transaction.
+        ///
+        /// Covers the plumbing from `recordStoreKit1Transaction` into the queued
+        /// `PurchaseEvent`. The `original?.transactionIdentifier ?? transactionId`
+        /// fallback itself lives in `paymentQueue(_:updatedTransactions:)` and stays
+        /// uncovered: `SKPaymentTransaction` has no public initialiser, so a real
+        /// transaction cannot be built in a unit test.
+        func recordStoreKit1ForTesting(transactionId: String, originalTransactionId: String?) {
+            recordStoreKit1Transaction(
+                transactionId: transactionId,
+                originalTransactionId: originalTransactionId,
+                productId: "test.product",
+                quantity: 1,
+                date: Date(timeIntervalSince1970: 0)
+            )
+        }
+
+        /// The events currently queued, for asserting payload contents.
+        var queuedEventsForTesting: [PurchaseEvent] {
+            eventQueue.peek()
         }
 
         /// Current depth of the persistent event queue.
