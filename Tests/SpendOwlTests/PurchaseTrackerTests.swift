@@ -107,6 +107,57 @@ final class PurchaseTrackerTests: XCTestCase {
         XCTAssertEqual(next.pendingCountForTesting, 1, "the queue must still hold exactly one copy")
     }
 
+    // MARK: - StoreKit 1 path
+
+    /// SK1-recorded events used to ship `originalTransactionId: nil`, which kept them out
+    /// of the backend's lineage matching on `apple_webhooks.original_transaction_id`.
+    func testStoreKit1EventCarriesOriginalTransactionId() {
+        let tracker = makeTracker()
+
+        tracker.recordStoreKit1ForTesting(transactionId: "tx-renewal", originalTransactionId: "tx-original")
+
+        let event = tracker.queuedEventsForTesting.first
+        XCTAssertEqual(event?.transactionId, "tx-renewal")
+        XCTAssertEqual(event?.originalTransactionId, "tx-original", "SK1 events must carry the original id")
+    }
+
+    /// For an initial purchase StoreKit 1 leaves `original` nil, and `paymentQueue` falls
+    /// back to the transaction's own id so the payload matches StoreKit 2's `originalID`.
+    func testStoreKit1InitialPurchaseReportsSelfAsOriginal() {
+        let tracker = makeTracker()
+
+        tracker.recordStoreKit1ForTesting(transactionId: "tx-first", originalTransactionId: "tx-first")
+
+        let event = tracker.queuedEventsForTesting.first
+        XCTAssertEqual(event?.originalTransactionId, "tx-first")
+    }
+
+    // MARK: - Restart
+
+    /// `stopObserving` re-seeds the pending set from the queue: an id that was claimed but
+    /// then evicted must become re-enqueueable, while an id still queued stays deduped.
+    func testStopObservingReleasesEvictedIdsButKeepsQueuedOnes() {
+        let tracker = makeTracker()
+        XCTAssertTrue(tracker.enqueueForTesting(transactionId: "tx-kept"))
+        XCTAssertTrue(tracker.enqueueForTesting(transactionId: "tx-evicted"))
+
+        // Simulate the bounded queue evicting one of them before any send succeeded.
+        Defaults.shared.pendingEventsData = nil
+        XCTAssertTrue(tracker.enqueueForTesting(transactionId: "tx-kept-requeue"))
+        XCTAssertEqual(tracker.queuedEventsForTesting.map(\.transactionId), ["tx-kept-requeue"])
+
+        tracker.stopObserving()
+
+        XCTAssertTrue(
+            tracker.enqueueForTesting(transactionId: "tx-evicted"),
+            "an id claimed but no longer queued must be released on stop"
+        )
+        XCTAssertFalse(
+            tracker.enqueueForTesting(transactionId: "tx-kept-requeue"),
+            "an id still in the queue must stay deduped after stop"
+        )
+    }
+
     // MARK: - Helpers
 
     private func makeTracker() -> PurchaseTracker {
