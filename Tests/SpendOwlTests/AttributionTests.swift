@@ -249,6 +249,49 @@ final class AttributionTests: XCTestCase {
         XCTAssertEqual(captured.value?.externalUserId, "dev-1")
     }
 
+    /// The host app's opt-in has to reach the server, because the only other signal — the
+    /// console warning — is off by default and compiled out of release builds, so it never
+    /// leaves the developer's machine.
+    func testForwardsConsumableHistoryOptIn() async throws {
+        let captured = CapturedRequest()
+        let service = makeServiceFor(
+            tokenProvider: { "tok" },
+            sender: { request in
+                captured.set(request)
+                return self.makeStubResult(id: "s1", status: .attributed)
+            }
+        )
+
+        _ = try await service.fetchAttribution(userId: "anon-1")
+
+        // The test host has no such key, so this pins the absent-key default reaching the
+        // wire rather than being dropped or defaulting to true somewhere along the way.
+        XCTAssertEqual(captured.value?.consumableHistoryEnabled, false)
+        XCTAssertEqual(captured.value?.consumableHistoryEnabled, ConsumableHistory.isEnabled)
+    }
+
+    /// A pending payload can be days old and the app may have shipped an update since, so
+    /// the opt-in must be read at replay time — like the identity fields, and unlike the
+    /// token and device info, which describe the original install.
+    func testReplayReadsConsumableHistoryOptInFresh() async throws {
+        let queue = AttributionQueue()
+        queue.save(makePending(token: "leftover"))
+
+        let captured = CapturedRequest()
+        let service = makeServiceFor(
+            queue: queue,
+            tokenProvider: { XCTFail("Replay must not fetch a fresh token"); return "" },
+            sender: { request in
+                captured.set(request)
+                return self.makeStubResult(id: "s1", status: .attributed)
+            }
+        )
+
+        _ = try await service.fetchAttribution(userId: "u1")
+
+        XCTAssertEqual(captured.value?.consumableHistoryEnabled, ConsumableHistory.isEnabled)
+    }
+
     // MARK: - AttributionService Token Retry
 
     func testTokenRetrySucceedsOnSecondAttempt() async {

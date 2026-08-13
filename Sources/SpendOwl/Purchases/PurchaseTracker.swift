@@ -325,6 +325,23 @@ final class PurchaseTracker: NSObject, SKPaymentTransactionObserver, @unchecked 
         await bgTask.end()
     }
 
+    /// Builds the payload for a batch of queued events.
+    ///
+    /// Split out of ``drainEventQueue()`` so tests can assert what goes on the wire without
+    /// a network round trip. `consumableHistoryEnabled` is read here rather than cached,
+    /// so it reflects the app as it is now — attribution only reports it once per install,
+    /// and this is what keeps the value current for apps that add the key in a later
+    /// version.
+    func makeEventsRequest(for events: [PurchaseEvent]) -> EventsRequest {
+        EventsRequest(
+            events: events,
+            userId: resolveLinkageUserId(),
+            externalUserId: resolveExternalUserId(),
+            bundleId: Bundle.main.bundleIdentifier ?? "unknown",
+            consumableHistoryEnabled: ConsumableHistory.isEnabled
+        )
+    }
+
     /// Drains the queue until it is empty or a send fails, re-checking after each success
     /// so events enqueued mid-send go out in the same pass. Caller must hold the send slot.
     private func drainEventQueue() async {
@@ -333,12 +350,7 @@ final class PurchaseTracker: NSObject, SKPaymentTransactionObserver, @unchecked 
             let pending = eventQueue.peek()
             guard !pending.isEmpty else { return }
 
-            let request = EventsRequest(
-                events: pending,
-                userId: resolveLinkageUserId(),
-                externalUserId: resolveExternalUserId(),
-                bundleId: Bundle.main.bundleIdentifier ?? "unknown"
-            )
+            let request = makeEventsRequest(for: pending)
 
             do {
                 let response = try await apiClient.sendEvents(request)
