@@ -11,15 +11,23 @@ import StoreKit
 
 /// Internal service for fully automatic purchase tracking.
 ///
-/// Uses three complementary listeners to capture every purchase:
-/// 1. `SKPaymentTransactionObserver` — catches the first purchase in the same session
-/// 2. `Transaction.updates` — catches renewals, cross-device, Ask to Buy, offer codes
-/// 3. `Transaction.all` — startup safety net for missed purchases (incl. consumables,
-///    which `currentEntitlements` omits by design)
+/// Uses three complementary listeners:
+/// 1. `SKPaymentTransactionObserver` — StoreKit 1 transactions
+/// 2. `Transaction.updates` — renewals, cross-device, Ask to Buy, offer codes. Apple does
+///    *not* deliver the result of a direct `Product.purchase()` call here.
+/// 3. `Transaction.all` — startup safety net that re-emits history a launch may have missed
+///
+/// Coverage is not uniform across product types, and the gap is structural rather than a
+/// bug here: `Transaction.all` omits consumables the app has already finished, so once a
+/// consumable is finished the safety net can no longer see it. Subscriptions and
+/// non-consumables stay in history and are recovered on any later launch. From iOS 18 the
+/// host app can opt back in with `SKIncludeConsumableInAppPurchaseHistory` — see
+/// ``ConsumableHistory``, which reports whether this app has.
 ///
 /// Deduplication is atomic and transactionId-based: the persisted `sentTransactionIds`
-/// (confirmed sends) combined with an in-memory pending set, so events dropped from the
-/// bounded queue before sending are recovered on a later launch rather than lost.
+/// (confirmed sends) combined with an in-memory pending set. An event dropped from the
+/// bounded queue before it was sent is therefore re-enqueueable on a later launch — but
+/// only for products the scan can still see, which is the same caveat as above.
 /// The SDK is fully read-only: neither `transaction.finish()` nor `finishTransaction()` is called.
 @available(iOS 15.0, macOS 12.0, *)
 final class PurchaseTracker: NSObject, SKPaymentTransactionObserver, @unchecked Sendable {
@@ -27,7 +35,7 @@ final class PurchaseTracker: NSObject, SKPaymentTransactionObserver, @unchecked 
 
     private let apiClient: APIClient
     private let defaults = Defaults.shared
-    private let eventQueue: EventQueue
+    let eventQueue: EventQueue
     private let lock = NSLock()
     private var scanTask: Task<Void, Never>?
     private var updateTask: Task<Void, Never>?
@@ -75,6 +83,10 @@ final class PurchaseTracker: NSObject, SKPaymentTransactionObserver, @unchecked 
             lock.unlock()
             return
         }
+
+        // Surface the consumable-history gap while the developer is integrating, since
+        // the SDK cannot close it from here.
+        ConsumableHistory.warnIfMissing()
 
         // Flush pending events first, then scan entitlements — sequential
         // to avoid concurrent EventQueue access.
@@ -166,7 +178,7 @@ final class PurchaseTracker: NSObject, SKPaymentTransactionObserver, @unchecked 
     // MARK: - Transaction Recording
 
     /// Records a purchase observed via `SKPaymentTransactionObserver`.
-    private func recordStoreKit1Transaction(
+    func recordStoreKit1Transaction(
         transactionId: String,
         originalTransactionId: String?,
         productId: String,
@@ -250,11 +262,18 @@ final class PurchaseTracker: NSObject, SKPaymentTransactionObserver, @unchecked 
 
     /// Scans `Transaction.all` as a safety net for missed purchases.
     ///
-    /// Unlike `currentEntitlements`, `Transaction.all` returns the customer's full
-    /// transaction history — **including consumables** (which `currentEntitlements`
-    /// excludes by design). Refunded/revoked entries are also included but harmless:
-    /// the SDK only sends the attribution↔transaction link, never price or revocation
-    /// state (those arrive via App Store Server Notifications on the backend).
+    /// `Transaction.all` returns more than `currentEntitlements` — it includes expired
+    /// subscriptions and non-consumables the customer no longer owns — but it is **not**
+    /// a complete history. A consumable disappears from it as soon as the app calls
+    /// `finish()` on it, which apps typically do the moment they grant the content. So
+    /// this scan recovers subscriptions and non-consumables reliably and finished
+    /// consumables not at all. On iOS 18+ the host app can opt back in by setting
+    /// `SKIncludeConsumableInAppPurchaseHistory`; ``ConsumableHistory`` logs a warning
+    /// during development when it hasn't.
+    ///
+    /// Refunded/revoked entries are included but harmless: the SDK only sends the
+    /// attribution↔transaction link, never price or revocation state (those arrive via
+    /// App Store Server Notifications on the backend).
     ///
     /// New events are batched and flushed every ``scanFlushBatchSize`` transactions so
     /// the bounded `EventQueue` never overflows on long-lived customers; a final flush
@@ -297,7 +316,7 @@ final class PurchaseTracker: NSObject, SKPaymentTransactionObserver, @unchecked 
     /// slot is claimed so race losers don't begin one for a no-op, and the drain loop is
     /// extracted so no early return can sit between `begin` and `end` — `defer` cannot
     /// `await`, and a leaked assertion gets the host app terminated.
-    private func sendEnqueuedEvents() async {
+    func sendEnqueuedEvents() async {
         guard tryAcquireSend() else { return }
         defer { releaseSend() }
 
@@ -364,7 +383,7 @@ final class PurchaseTracker: NSObject, SKPaymentTransactionObserver, @unchecked 
     /// but not yet sent). IDs are only persisted as sent after a successful network send
     /// (see ``markSent(_:)``), so an event evicted from the bounded `EventQueue` before
     /// sending is recovered on the next launch instead of being permanently dropped.
-    private func markTransactionIfNew(_ transactionId: String) -> Bool {
+    func markTransactionIfNew(_ transactionId: String) -> Bool {
         lock.lock()
         defer { lock.unlock() }
         if defaults.sentTransactionIds.contains(transactionId)
@@ -381,7 +400,7 @@ final class PurchaseTracker: NSObject, SKPaymentTransactionObserver, @unchecked 
     /// clears them from the in-memory pending set. The 1000-cap evicts arbitrary older
     /// IDs (never the just-sent ones) to bound storage; re-sending an evicted transaction
     /// later is harmless because the backend is idempotent.
-    private func markSent(_ transactionIds: [String]) {
+    func markSent(_ transactionIds: [String]) {
         guard !transactionIds.isEmpty else { return }
         lock.lock()
         defer { lock.unlock() }
@@ -432,68 +451,3 @@ final class PurchaseTracker: NSObject, SKPaymentTransactionObserver, @unchecked 
         return "production"
     }
 }
-
-#if DEBUG
-    /// Test seams for deterministic verification of the dedup / mark-on-send / recovery logic
-    /// without StoreKit. Compiled out of release builds. Lives in the same file so it can reach
-    /// the private dedup and send internals.
-    @available(iOS 15.0, macOS 12.0, *)
-    extension PurchaseTracker {
-        /// Enqueues a synthetic purchase through the real dedup + queue path (no StoreKit).
-        /// Returns `true` if newly enqueued (not already sent or pending this session).
-        func enqueueForTesting(transactionId: String, productId: String = "test.product") -> Bool {
-            guard markTransactionIfNew(transactionId) else { return false }
-            let event = PurchaseEvent(
-                type: "purchase",
-                transactionId: transactionId,
-                originalTransactionId: nil,
-                productId: productId,
-                purchaseDate: Date(timeIntervalSince1970: 0),
-                price: nil,
-                currency: nil,
-                countryCode: nil,
-                quantity: 1,
-                environment: "sandbox"
-            )
-            eventQueue.enqueue([event])
-            return true
-        }
-
-        /// Runs the send loop and awaits completion (a real network attempt).
-        func flushForTesting() async {
-            await sendEnqueuedEvents()
-        }
-
-        /// Marks ids as confirmed-sent, simulating a successful network send.
-        func markSentForTesting(_ transactionIds: [String]) {
-            markSent(transactionIds)
-        }
-
-        /// Runs the real StoreKit 1 recording path with a synthetic transaction.
-        ///
-        /// Covers the plumbing from `recordStoreKit1Transaction` into the queued
-        /// `PurchaseEvent`. The `original?.transactionIdentifier ?? transactionId`
-        /// fallback itself lives in `paymentQueue(_:updatedTransactions:)` and stays
-        /// uncovered: `SKPaymentTransaction` has no public initialiser, so a real
-        /// transaction cannot be built in a unit test.
-        func recordStoreKit1ForTesting(transactionId: String, originalTransactionId: String?) {
-            recordStoreKit1Transaction(
-                transactionId: transactionId,
-                originalTransactionId: originalTransactionId,
-                productId: "test.product",
-                quantity: 1,
-                date: Date(timeIntervalSince1970: 0)
-            )
-        }
-
-        /// The events currently queued, for asserting payload contents.
-        var queuedEventsForTesting: [PurchaseEvent] {
-            eventQueue.peek()
-        }
-
-        /// Current depth of the persistent event queue.
-        var pendingCountForTesting: Int {
-            eventQueue.pendingCount
-        }
-    }
-#endif
