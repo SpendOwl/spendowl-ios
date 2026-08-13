@@ -107,6 +107,39 @@ final class PurchaseTrackerTests: XCTestCase {
         XCTAssertEqual(next.pendingCountForTesting, 1, "the queue must still hold exactly one copy")
     }
 
+    // MARK: - Confirmed-sent cap
+
+    /// Regression: the cap used to hold a `Set` and evict whatever `Set.first(where:)`
+    /// returned, which is hash order rather than age — so a transaction sent moments ago
+    /// could be dropped while a much older one survived. Eviction must take the oldest.
+    func testCapEvictsOldestFirst() {
+        let tracker = makeTracker()
+
+        tracker.markSentForTesting((0 ..< 1000).map { "tx-\($0)" })
+        XCTAssertEqual(Defaults.shared.sentTransactionIds.count, 1000)
+
+        tracker.markSentForTesting(["tx-newest"])
+
+        let stored = Defaults.shared.sentTransactionIds
+        XCTAssertEqual(stored.count, 1000, "cap must hold")
+        XCTAssertFalse(stored.contains("tx-0"), "the oldest id must be the one evicted")
+        XCTAssertTrue(stored.contains("tx-1"), "the second-oldest must survive")
+        XCTAssertTrue(stored.contains("tx-newest"), "the just-sent id must never be evicted")
+        XCTAssertEqual(stored.first, "tx-1", "the list must stay ordered oldest-first")
+        XCTAssertEqual(stored.last, "tx-newest")
+    }
+
+    /// Re-sending an id already recorded must not move it to the back, or a repeatedly
+    /// re-sent old transaction would outlive genuinely newer ones.
+    func testRepeatedSendDoesNotReorderExistingId() {
+        let tracker = makeTracker()
+
+        tracker.markSentForTesting(["a", "b", "c"])
+        tracker.markSentForTesting(["a"])
+
+        XCTAssertEqual(Defaults.shared.sentTransactionIds, ["a", "b", "c"])
+    }
+
     // MARK: - StoreKit 1 path
 
     /// SK1-recorded events used to ship `originalTransactionId: nil`, which kept them out
