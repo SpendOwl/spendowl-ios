@@ -47,6 +47,35 @@ let attribution = try await SpendOwl.attribution()
 print(attribution.campaignName ?? "organic")
 ```
 
+## Selling consumables?
+
+**Only relevant if your app sells consumable products.** Subscriptions and
+non-consumables need nothing beyond the Quick Start above.
+
+Add this to your app's `Info.plist`:
+
+```xml
+<key>SKIncludeConsumableInAppPurchaseHistory</key>
+<true/>
+```
+
+**Why.** StoreKit removes a consumable from `Transaction.all` the moment your app calls
+`finish()` on it. SpendOwl re-scans that history on every launch to catch purchases it
+missed live, so without this key a missed consumable is missed permanently — while
+subscriptions and non-consumables are always recovered. Setting it to `true` keeps
+finished consumables in history on iOS 18 and later, and SpendOwl picks them up with no
+further work from you.
+
+There is no code to call — this is a one-time project setting. SpendOwl cannot add the
+key for you: Swift packages cannot contribute entries to your app's `Info.plist`, and
+StoreKit reads it from the app bundle. Enable `SpendOwl.enableLogging` during
+integration and the SDK will tell you if the key is missing.
+
+**On iOS 17 and earlier** this is not possible at all — Apple provides no way to see a
+finished consumable, so a consumable that isn't captured at the moment of purchase
+cannot be recovered. SpendOwl does not ship a manual reporting API to work around it.
+As of mid-2026 iOS 18+ covers roughly 97% of devices, and that share keeps growing.
+
 ## Requirements
 
 | | Minimum |
