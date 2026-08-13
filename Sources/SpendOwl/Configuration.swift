@@ -44,10 +44,14 @@ public struct SpendOwlConfiguration: Sendable {
     /// timeout issues on slow networks.
     public let timeoutInterval: TimeInterval
 
-    /// The maximum number of retry attempts for failed requests.
+    /// The total number of attempts made for a request, including the first one.
     ///
-    /// Defaults to 3. Failed requests are retried with exponential backoff.
-    /// Client errors (4xx) are not retried.
+    /// Defaults to 3 — one initial request plus two retries — with exponential backoff
+    /// between them. Client errors (4xx) are never retried.
+    ///
+    /// Despite the name this counts attempts rather than retries; a value of `1` means a
+    /// single try and no retry at all. Values below `1` are raised to `1`, because a
+    /// request count of zero would leave the SDK unable to send anything.
     public let maxRetries: Int
 
     /// The default API base URL (`https://spendowl.io/api`).
@@ -64,7 +68,8 @@ public struct SpendOwlConfiguration: Sendable {
     ///   - apiKey: Your SpendOwl API key (required).
     ///   - baseURL: The API base URL. Defaults to SpendOwl production servers.
     ///   - timeoutInterval: Network timeout in seconds. Defaults to 10.
-    ///   - maxRetries: Maximum retry attempts for failed requests. Defaults to 3.
+    ///   - maxRetries: Total attempts per request, including the first. Defaults to 3
+    ///     (one request plus two retries). Values below 1 are raised to 1.
     public init(
         apiKey: String,
         baseURL: URL = Self.defaultBaseURL,
@@ -74,6 +79,10 @@ public struct SpendOwlConfiguration: Sendable {
         self.apiKey = apiKey
         self.baseURL = baseURL
         self.timeoutInterval = timeoutInterval
-        self.maxRetries = maxRetries
+        // Clamped here rather than defended at the call site, so no part of the SDK ever
+        // sees a value that cannot describe a real request. `0` would stop the SDK sending
+        // anything at all, and a negative value used to trap outright — a public
+        // initialiser must not be able to crash the host app over a typo.
+        self.maxRetries = max(1, maxRetries)
     }
 }
