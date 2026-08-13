@@ -5,6 +5,45 @@ All notable changes to the SpendOwl iOS SDK are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-08-13
+
+Consumable purchase coverage is now stated accurately, and apps selling consumables
+have a way to close the gap. The public API is unchanged; this is a minor release
+because integration gains a step for those apps.
+
+### Added
+
+- `SKIncludeConsumableInAppPurchaseHistory` support. Apps selling consumables should
+  set this key to `true` in their own `Info.plist`. On iOS 18 and later it keeps
+  finished consumables in `Transaction.all`, which is what the SDK's startup scan
+  reads — so the existing recovery path begins covering consumables with no code
+  change. The SDK reads the key at launch and logs a warning when it is absent, since
+  it cannot set the key itself: Swift package resources never merge into the app's
+  `Info.plist`, and StoreKit reads it from the app bundle.
+  ([#10](https://github.com/SpendOwl/spendowl-ios/pull/10))
+
+### Fixed
+
+- The 1000-entry cap on confirmed-sent transaction IDs evicted arbitrary entries
+  rather than the oldest, because the IDs were held in a `Set` and `Set.first(where:)`
+  returns hash order. An ID recorded moments earlier could be dropped while one from
+  years back survived. Evicted IDs stop being deduplicated, so their transactions are
+  re-sent and have their attribution re-resolved; taking the oldest first confines that
+  to transactions least likely to still be visible.
+  ([#11](https://github.com/SpendOwl/spendowl-ios/pull/11))
+
+### Changed
+
+- Documentation of what the startup scan recovers was wrong and is corrected. It
+  claimed `Transaction.all` was a safety net "including consumables"; StoreKit in fact
+  drops a consumable from that history as soon as the app calls `finish()` on it, and
+  `Transaction.updates` never carries the result of a direct `Product.purchase()` call.
+  Subscriptions and non-consumables were always recovered and still are.
+  ([#10](https://github.com/SpendOwl/spendowl-ios/pull/10))
+- `Defaults.sentTransactionIds` is an ordered `[String]` rather than a `Set<String>`.
+  The persisted representation is unchanged — it was always a string array — so no
+  migration is required. ([#11](https://github.com/SpendOwl/spendowl-ios/pull/11))
+
 ## [1.3.1] - 2026-08-13
 
 Reliability fixes for the purchase reporting path. No public API changes.
@@ -89,6 +128,7 @@ Reliability fixes for the purchase reporting path. No public API changes.
 
 Initial release: Apple Ads attribution and StoreKit 2 purchase tracking.
 
+[1.4.0]: https://github.com/SpendOwl/spendowl-ios/compare/v1.3.1...v1.4.0
 [1.3.1]: https://github.com/SpendOwl/spendowl-ios/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/SpendOwl/spendowl-ios/compare/v1.2.1...v1.3.0
 [1.2.1]: https://github.com/SpendOwl/spendowl-ios/compare/v1.2.0...v1.2.1
