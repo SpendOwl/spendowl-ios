@@ -5,6 +5,27 @@ All notable changes to the SpendOwl iOS SDK are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.2] - 2026-08-13
+
+### Fixed
+
+- `SpendOwlConfiguration` no longer accepts a `maxRetries` that cannot describe a real
+  request. `0` left the SDK unable to send anything while reporting a network failure that
+  had never been attempted, and a negative value crashed the host app outright with
+  `Range requires lowerBound <= upperBound`. Values below `1` are now raised to `1`.
+  ([#16](https://github.com/SpendOwl/spendowl-ios/pull/16))
+
+  This is a behaviour change for anyone who was passing such a value: requests that used to
+  be silently dropped are now sent once. Nothing changes for valid configurations.
+
+### Changed
+
+- `maxRetries` is documented as what it is — the **total** number of attempts including the
+  first, so the default of `3` means one request plus two retries. The name and behaviour
+  were always this way; only the doc comments were wrong. The parameter is not renamed,
+  because it is a public initialiser label and renaming it would break every integration
+  that passes it. ([#16](https://github.com/SpendOwl/spendowl-ios/pull/16))
+
 ## [1.4.1] - 2026-08-13
 
 ### Added
@@ -146,6 +167,7 @@ Reliability fixes for the purchase reporting path. No public API changes.
 
 Initial release: Apple Ads attribution and StoreKit 2 purchase tracking.
 
+[1.4.2]: https://github.com/SpendOwl/spendowl-ios/compare/v1.4.1...v1.4.2
 [1.4.1]: https://github.com/SpendOwl/spendowl-ios/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/SpendOwl/spendowl-ios/compare/v1.3.1...v1.4.0
 [1.3.1]: https://github.com/SpendOwl/spendowl-ios/compare/v1.3.0...v1.3.1
