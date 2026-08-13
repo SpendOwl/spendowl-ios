@@ -288,13 +288,27 @@ final class PurchaseTracker: NSObject, SKPaymentTransactionObserver, @unchecked 
     /// Sends all events currently in the persistent queue.
     ///
     /// Serialized via `_isSending` flag — concurrent callers return immediately.
-    /// After a successful send, re-checks the queue to drain events that were
-    /// enqueued during the network call. Lock interactions live in sync helpers
-    /// so they're never reached from an async context (Swift 6 strict-concurrency).
+    /// Lock interactions live in sync helpers so they're never reached from an
+    /// async context (Swift 6 strict-concurrency).
+    ///
+    /// The background-task assertion buys the request time when the user backgrounds
+    /// the app right after paying; losing that race costs delay, not data, but the
+    /// transaction looks unattributed until the next launch. It is taken after the send
+    /// slot is claimed so race losers don't begin one for a no-op, and the drain loop is
+    /// extracted so no early return can sit between `begin` and `end` — `defer` cannot
+    /// `await`, and a leaked assertion gets the host app terminated.
     private func sendEnqueuedEvents() async {
         guard tryAcquireSend() else { return }
         defer { releaseSend() }
 
+        let bgTask = await BackgroundTaskAssertion.begin(name: "SpendOwl.PurchaseEvents")
+        await drainEventQueue()
+        await bgTask.end()
+    }
+
+    /// Drains the queue until it is empty or a send fails, re-checking after each success
+    /// so events enqueued mid-send go out in the same pass. Caller must hold the send slot.
+    private func drainEventQueue() async {
         // Loop to drain events enqueued while a send was in-flight.
         while true {
             let pending = eventQueue.peek()

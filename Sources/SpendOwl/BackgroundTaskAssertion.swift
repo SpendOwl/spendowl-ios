@@ -14,9 +14,12 @@ import Foundation
 // Wraps `UIApplication.beginBackgroundTask(...)` so a short-running async task
 // can ask the OS for a few extra seconds before it is suspended.
 //
-// Used around the SDK's first-launch attribution send so the request has a
-// chance to complete even if the user backgrounds the app within seconds of
-// `SpendOwl.configure()` being called.
+// Used around the two sends that race the app being backgrounded:
+//
+// 1. The first-launch attribution send, so the request has a chance to complete
+//    even if the user backgrounds the app within seconds of `SpendOwl.configure()`.
+// 2. Purchase event sends, because the moment right after a purchase completes is
+//    when the user is most likely to leave the app.
 //
 // The expiration handler ends the task immediately to avoid the OS terminating
 // the app, and the explicit `end()` is idempotent so it is safe to call from
