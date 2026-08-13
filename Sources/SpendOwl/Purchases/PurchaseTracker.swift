@@ -396,22 +396,41 @@ final class PurchaseTracker: NSObject, SKPaymentTransactionObserver, @unchecked 
         return true
     }
 
+    /// Maximum number of confirmed-sent transaction IDs retained for dedup.
+    private static let maxSentTransactionIds = 1000
+
     /// Persists transaction IDs as confirmed-sent after a successful network send and
-    /// clears them from the in-memory pending set. The 1000-cap evicts arbitrary older
-    /// IDs (never the just-sent ones) to bound storage; re-sending an evicted transaction
-    /// later is harmless because the backend is idempotent.
+    /// clears them from the in-memory pending set.
+    ///
+    /// The list is append-ordered and the cap evicts from the front, so the entries
+    /// dropped are the genuinely oldest. It previously held a `Set` and evicted whatever
+    /// `Set.first(where:)` returned — hash order, not age — which could discard an ID
+    /// sent minutes ago while keeping one from years back.
+    ///
+    /// Eviction is not free: an ID that leaves this list is no longer deduped, so if the
+    /// transaction is still visible to the startup scan it gets re-enqueued and re-sent.
+    /// The backend is idempotent so no duplicate revenue is recorded, but `/v1/events`
+    /// re-resolves attribution for that transaction at replay time. Evicting oldest-first
+    /// keeps that replay confined to the transactions least likely to still be in
+    /// `Transaction.all`.
     func markSent(_ transactionIds: [String]) {
         guard !transactionIds.isEmpty else { return }
         lock.lock()
         defer { lock.unlock() }
+
         var sentIds = defaults.sentTransactionIds
-        let justSent = Set(transactionIds)
+        var known = Set(sentIds)
         for id in transactionIds {
-            sentIds.insert(id)
+            // Appends only genuinely new IDs, so a repeat send doesn't move an existing
+            // entry to the back and outlive newer ones.
+            if known.insert(id).inserted {
+                sentIds.append(id)
+            }
             _pendingTransactionIds.remove(id)
         }
-        while sentIds.count > 1000, let evictable = sentIds.first(where: { !justSent.contains($0) }) {
-            sentIds.remove(evictable)
+
+        if sentIds.count > Self.maxSentTransactionIds {
+            sentIds.removeFirst(sentIds.count - Self.maxSentTransactionIds)
         }
         defaults.sentTransactionIds = sentIds
     }

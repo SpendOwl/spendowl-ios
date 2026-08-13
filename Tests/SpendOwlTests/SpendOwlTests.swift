@@ -273,20 +273,17 @@ final class SpendOwlTests: XCTestCase {
 
     // MARK: - Thread Safety
 
-    func testSentTransactionIdsBoundedAt1000() {
+    /// `Defaults` stores whatever it is given — the cap lives in `PurchaseTracker` — and
+    /// must preserve order, which is what makes oldest-first eviction possible.
+    func testSentTransactionIdsRoundTripPreservesOrder() {
         let defaults = Defaults.shared
 
-        // Insert 1050 IDs
-        var ids = Set<String>()
-        for i in 0 ..< 1050 {
-            ids.insert("bound-tx-\(i)")
-        }
+        let ids = (0 ..< 1050).map { "bound-tx-\($0)" }
         defaults.sentTransactionIds = ids
 
-        // Read back — Defaults stores the raw set; PurchaseTracker enforces the 1000 cap.
-        // Here we verify Defaults faithfully round-trips even a large set.
         let stored = defaults.sentTransactionIds
         XCTAssertEqual(stored.count, 1050)
+        XCTAssertEqual(stored, ids, "order must survive the round trip")
     }
 
     func testDefaultsConcurrentAccess() {
@@ -297,7 +294,7 @@ final class SpendOwlTests: XCTestCase {
 
         for i in 0 ..< iterations {
             DispatchQueue.global().async {
-                defaults.sentTransactionIds = Set(["tx\(i)"])
+                defaults.sentTransactionIds = ["tx\(i)"]
                 expectation.fulfill()
             }
             DispatchQueue.global().async {

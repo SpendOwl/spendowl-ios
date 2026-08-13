@@ -66,15 +66,17 @@ final class Defaults: @unchecked Sendable {
         set { suite.set(newValue, forKey: prefixed(.cachedAttributionResult)) }
     }
 
-    /// Transaction IDs that have been sent to prevent duplicates.
-    var sentTransactionIds: Set<String> {
-        get {
-            let array = suite.stringArray(forKey: prefixed(.sentTransactionIds)) ?? []
-            return Set(array)
-        }
-        set {
-            suite.set(Array(newValue), forKey: prefixed(.sentTransactionIds))
-        }
+    /// Transaction IDs confirmed sent, oldest first, used to prevent duplicates.
+    ///
+    /// Ordered rather than a `Set` so that ``PurchaseTracker``'s cap can evict the
+    /// genuinely oldest entries instead of arbitrary ones. The stored representation is
+    /// unchanged — this was always a string array in `UserDefaults`, with the `Set` only
+    /// ever an in-memory view — so existing installs need no migration. Their array keeps
+    /// whatever order it happened to have, and becomes meaningfully ordered from the next
+    /// confirmed send onwards.
+    var sentTransactionIds: [String] {
+        get { suite.stringArray(forKey: prefixed(.sentTransactionIds)) ?? [] }
+        set { suite.set(newValue, forKey: prefixed(.sentTransactionIds)) }
     }
 
     /// Pending purchase events as JSON data for retry.
