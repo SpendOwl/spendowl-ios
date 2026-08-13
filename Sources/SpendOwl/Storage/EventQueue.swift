@@ -62,21 +62,38 @@ final class EventQueue: @unchecked Sendable {
         return loadEvents()
     }
 
-    /// Removes the first `count` events from the queue after successful send.
+    /// Removes the events with the given transaction IDs after a successful send.
     ///
-    /// - Parameter count: The number of events to remove from the front.
-    func remove(count: Int) {
-        guard count > 0 else { return }
+    /// Removal is identity-based, never positional. A send takes a snapshot of the
+    /// queue and then awaits the network; events enqueued during that window are
+    /// appended, and if the queue overflows they are trimmed from the *front*. So by
+    /// the time the send returns, a positional `removeFirst(snapshot.count)` would
+    /// discard events the send never carried — permanently, since they are already
+    /// marked pending in memory and so cannot be re-enqueued this session, yet were
+    /// never marked sent. Matching on IDs removes exactly what was sent and leaves
+    /// everything else queued for the next send.
+    ///
+    /// IDs no longer in the queue (trimmed by overflow while the send was in flight)
+    /// are simply ignored.
+    ///
+    /// - Parameter transactionIds: The transaction IDs confirmed sent.
+    func remove(transactionIds: [String]) {
+        guard !transactionIds.isEmpty else { return }
 
         lock.lock()
         defer { lock.unlock() }
 
-        var current = loadEvents()
-        let removeCount = min(count, current.count)
-        current.removeFirst(removeCount)
-        saveEvents(current)
+        let sent = Set(transactionIds)
+        let current = loadEvents()
+        let remaining = current.filter { !sent.contains($0.transactionId) }
 
-        Logger.log("Removed \(removeCount) events from queue, remaining: \(current.count)", level: .debug)
+        guard remaining.count != current.count else { return }
+        saveEvents(remaining)
+
+        Logger.log(
+            "Removed \(current.count - remaining.count) sent events from queue, remaining: \(remaining.count)",
+            level: .debug
+        )
     }
 
     /// The number of events waiting to be sent.
