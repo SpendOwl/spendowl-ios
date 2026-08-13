@@ -5,6 +5,24 @@ All notable changes to the SpendOwl iOS SDK are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.1] - 2026-08-13
+
+### Added
+
+- Attribution and purchase-event payloads now carry `consumableHistoryEnabled`, reporting
+  whether the host app declares `SKIncludeConsumableInAppPurchaseHistory` in its
+  `Info.plist`. Until now the only signal was a console warning, which is off by default
+  and compiled out of release builds, so a missing opt-in stayed invisible outside the
+  developer's own machine. Nothing changes for the app: no public API, no new call, one
+  boolean on requests that were already being sent.
+  ([#14](https://github.com/SpendOwl/spendowl-ios/pull/14))
+
+  The flag is on both payloads by design. Attribution is sent once per install, so on its
+  own it would freeze at whatever was true on first launch; purchase events flow
+  continuously and keep the value current for an app that adds the key in a later version.
+  It reports the app's declared intent only — the behaviour it unlocks also requires
+  iOS 18 or later at runtime.
+
 ## [1.4.0] - 2026-08-13
 
 Consumable purchase coverage is now stated accurately, and apps selling consumables
@@ -128,6 +146,7 @@ Reliability fixes for the purchase reporting path. No public API changes.
 
 Initial release: Apple Ads attribution and StoreKit 2 purchase tracking.
 
+[1.4.1]: https://github.com/SpendOwl/spendowl-ios/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/SpendOwl/spendowl-ios/compare/v1.3.1...v1.4.0
 [1.3.1]: https://github.com/SpendOwl/spendowl-ios/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/SpendOwl/spendowl-ios/compare/v1.2.1...v1.3.0
