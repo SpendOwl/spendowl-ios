@@ -77,10 +77,22 @@ actor APIClient {
         return try await executeWithRetry(request)
     }
 
+    /// Sends the request, retrying transient failures with exponential backoff.
+    ///
+    /// `maxRetries` is a total attempt count, not a retry count — see
+    /// ``SpendOwlConfiguration/maxRetries``, which clamps it to at least 1.
+    ///
+    /// `repeat`/`while` rather than a range loop, so one attempt always happens and
+    /// `lastError` can only be thrown after a real failure assigned it. The previous
+    /// version iterated `0 ..< maxRetries` over a seeded `URLError(.unknown)`: a
+    /// configuration of `0` sent nothing and reported a network failure that had never been
+    /// attempted, and a negative value trapped on the range itself.
     private func executeWithRetry<R: Decodable>(_ request: URLRequest) async throws -> R {
-        var lastError: Error = SpendOwlError.networkError(URLError(.unknown))
+        let attempts = configuration.maxRetries
+        var attempt = 0
+        var lastError: Error
 
-        for attempt in 0 ..< configuration.maxRetries {
+        repeat {
             do {
                 return try await execute(request)
             } catch {
@@ -92,13 +104,14 @@ actor APIClient {
                 }
 
                 // Exponential backoff: 0.5s, 1s, 2s, ...
-                if attempt < configuration.maxRetries - 1 {
+                if attempt < attempts - 1 {
                     let delay = pow(2.0, Double(attempt)) * 0.5
                     Logger.log("Request failed, retrying in \(delay)s (attempt \(attempt + 1))", level: .debug)
                     try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
                 }
             }
-        }
+            attempt += 1
+        } while attempt < attempts
 
         throw lastError
     }

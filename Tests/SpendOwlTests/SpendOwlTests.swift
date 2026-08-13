@@ -40,6 +40,51 @@ final class SpendOwlTests: XCTestCase {
         XCTAssertEqual(config.maxRetries, 5)
     }
 
+    /// `maxRetries` is a total attempt count, so anything below 1 describes a request that
+    /// is never sent. Zero used to leave the SDK silently unable to send anything, and a
+    /// negative value trapped on `0 ..< maxRetries` — a public initialiser must not be able
+    /// to crash the host app over a typo (`CLAUDE.md`: all public APIs are crash-proof).
+    func testMaxRetriesBelowOneIsRaisedToOne() {
+        XCTAssertEqual(SpendOwlConfiguration(apiKey: "k", maxRetries: 0).maxRetries, 1)
+        XCTAssertEqual(SpendOwlConfiguration(apiKey: "k", maxRetries: -1).maxRetries, 1)
+        XCTAssertEqual(SpendOwlConfiguration(apiKey: "k", maxRetries: Int.min).maxRetries, 1)
+    }
+
+    func testValidMaxRetriesIsLeftAlone() {
+        XCTAssertEqual(SpendOwlConfiguration(apiKey: "k", maxRetries: 1).maxRetries, 1)
+        XCTAssertEqual(SpendOwlConfiguration(apiKey: "k", maxRetries: 7).maxRetries, 7)
+    }
+
+    /// End to end over the path that used to trap: a configuration built with a negative
+    /// `maxRetries`, through `APIClient`, into the retry loop. Reaching the `catch` at all
+    /// is the assertion — before the clamp this crashed the process on `0 ..< -1` rather
+    /// than surfacing an error, so a failure here shows up as the suite dying, not as a
+    /// failed expectation.
+    func testNegativeMaxRetriesStillSendsAndThrowsRatherThanTrapping() async throws {
+        let configuration = try SpendOwlConfiguration(
+            apiKey: "test",
+            baseURL: XCTUnwrap(URL(string: "http://127.0.0.1:1/api")),
+            timeoutInterval: 1,
+            maxRetries: -1
+        )
+        let client = APIClient(configuration: configuration)
+
+        do {
+            _ = try await client.sendEvents(
+                EventsRequest(
+                    events: [],
+                    userId: "anon",
+                    externalUserId: nil,
+                    bundleId: "com.example.app",
+                    consumableHistoryEnabled: false
+                )
+            )
+            XCTFail("Unroutable host should not have succeeded")
+        } catch {
+            // Connection refused, surfaced as an error rather than a trap.
+        }
+    }
+
     // MARK: - Defaults Storage
 
     func testDefaultsStorage() {
