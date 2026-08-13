@@ -33,8 +33,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Select Xcode
-        run: sudo xcode-select -s /Applications/Xcode_16.2.app/Contents/Developer
+      # Deliberately NOT pinned to a specific Xcode, unlike the jobs above. Pinning to
+      # Xcode 16.2 made this job fail intermittently — some runner images carry that
+      # Xcode without its iOS platform, and xcodebuild then reports "iOS 18.2 is not
+      # installed" with no destination available. The runner's default Xcode always has
+      # its own platform installed. Building a Swift package also requires a
+      # `-destination`, so `-sdk iphonesimulator` alone is not an option here.
+      - name: Show Xcode version
+        run: xcodebuild -version
 
       # `swift build` only ever compiles for macOS, so the `#if canImport(UIKit) &&
       # os(iOS)` branches — the UIKit background-task assertion among them — ship
