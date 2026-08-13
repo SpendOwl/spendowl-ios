@@ -281,8 +281,12 @@ final class PurchaseTracker: NSObject, SKPaymentTransactionObserver, @unchecked 
 
             do {
                 let response = try await apiClient.sendEvents(request)
-                eventQueue.remove(count: pending.count)
-                markSent(pending.map(\.transactionId))
+                // Remove by identity, not by count: events enqueued during the await
+                // above shift the queue (and can trim it from the front on overflow),
+                // so a positional removal would drop events this send never carried.
+                let sentIds = pending.map(\.transactionId)
+                eventQueue.remove(transactionIds: sentIds)
+                markSent(sentIds)
                 Logger.log("Sent \(response.processed) purchase event(s)", level: .debug)
                 // Loop back to check for newly enqueued events
             } catch {

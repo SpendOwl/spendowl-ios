@@ -38,20 +38,41 @@ final class EventQueueTests: XCTestCase {
         let queue = EventQueue()
         queue.enqueue([makeEvent(id: "tx1"), makeEvent(id: "tx2"), makeEvent(id: "tx3")])
 
-        queue.remove(count: 2)
+        queue.remove(transactionIds: ["tx1", "tx2"])
         XCTAssertEqual(queue.pendingCount, 1)
 
         let remaining = queue.peek()
         XCTAssertEqual(remaining[0].transactionId, "tx3")
     }
 
+    /// Removal matches on identity, so it is order-independent — the send that
+    /// carried these events may have snapshotted them in any arrangement.
+    func testEventQueueRemoveIsOrderIndependent() {
+        let queue = EventQueue()
+        queue.enqueue([makeEvent(id: "tx1"), makeEvent(id: "tx2"), makeEvent(id: "tx3")])
+
+        queue.remove(transactionIds: ["tx3", "tx1"])
+
+        XCTAssertEqual(queue.peek().map(\.transactionId), ["tx2"])
+    }
+
     func testEventQueueRemoveAll() {
         let queue = EventQueue()
         queue.enqueue([makeEvent(id: "tx1")])
 
-        queue.remove(count: 1)
+        queue.remove(transactionIds: ["tx1"])
         XCTAssertEqual(queue.pendingCount, 0)
         XCTAssertTrue(queue.peek().isEmpty)
+    }
+
+    func testEventQueueRemoveUnknownIdIsNoop() {
+        let queue = EventQueue()
+        queue.enqueue([makeEvent(id: "tx1")])
+
+        // An id trimmed by overflow while the send was in flight is no longer queued.
+        queue.remove(transactionIds: ["tx-gone"])
+
+        XCTAssertEqual(queue.peek().map(\.transactionId), ["tx1"])
     }
 
     func testEventQueueBoundsAt100() {
@@ -73,11 +94,41 @@ final class EventQueueTests: XCTestCase {
         XCTAssertEqual(queue.pendingCount, 0)
     }
 
-    func testEventQueueRemoveZeroIsNoop() {
+    func testEventQueueRemoveEmptyIsNoop() {
         let queue = EventQueue()
         queue.enqueue([makeEvent(id: "tx1")])
-        queue.remove(count: 0)
+        queue.remove(transactionIds: [])
         XCTAssertEqual(queue.pendingCount, 1)
+    }
+
+    /// Regression: a send snapshots the queue, then awaits the network. Purchases that
+    /// arrive during that window are appended and overflow trims the queue from the
+    /// front. The old positional removal (`removeFirst(snapshot.count)`) then deleted
+    /// those newly arrived events even though the send never carried them — and because
+    /// they were already marked pending in memory they could not be re-enqueued, so for
+    /// consumables (absent from `Transaction.all` once finished) they were lost for good.
+    func testEventsEnqueuedDuringInFlightSendSurviveRemoval() {
+        let queue = EventQueue()
+
+        // A full queue, captured by an in-flight send.
+        let inFlight = (0 ..< 100).map { makeEvent(id: "tx\($0)") }
+        queue.enqueue(inFlight)
+        XCTAssertEqual(queue.pendingCount, 100)
+
+        // 10 purchases arrive while that send is awaiting the network. Overflow trims
+        // the 10 oldest — which the in-flight send already carries.
+        let arrivedDuringSend = (100 ..< 110).map { makeEvent(id: "tx\($0)") }
+        queue.enqueue(arrivedDuringSend)
+        XCTAssertEqual(queue.pendingCount, 100)
+
+        // The send succeeds and removes exactly what it carried.
+        queue.remove(transactionIds: inFlight.map(\.transactionId))
+
+        XCTAssertEqual(
+            queue.peek().map(\.transactionId),
+            arrivedDuringSend.map(\.transactionId),
+            "events enqueued during an in-flight send must survive that send's removal"
+        )
     }
 
     func testEventQueuePersistence() {
