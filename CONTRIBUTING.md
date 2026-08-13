@@ -104,6 +104,27 @@ We use [Conventional Commits](https://www.conventionalcommits.org/):
 - `chore:` maintenance tasks
 - `docs:` documentation changes
 
+## Releases
+
+Version bumps are **not** part of feature or fix PRs. Several merged PRs are batched
+into one release, so `Version.swift` and `CHANGELOG.md` change only in a dedicated
+release PR. This keeps `main` readable — each PR describes one change — and keeps the
+changelog writable, since it is assembled from the PRs a release contains.
+
+To cut a release:
+
+1. Open a release PR that updates `CHANGELOG.md` with a new version section and sets
+   `spendOwlVersion` in `Sources/SpendOwl/Version.swift` to the same version.
+2. Merge it, then tag the merge commit with a **`v`-prefixed** tag (`v1.3.1`).
+   Swift Package Manager resolves both forms, but the repository is consistent on `v`.
+3. CI's `Version matches tag` job runs on the tag and fails the release if
+   `Version.swift` disagrees with it. That string is reported to the backend as
+   `sdkVersion`, so drift silently corrupts per-version reporting.
+
+Versioning follows [Semantic Versioning](https://semver.org). Because the public API
+surface is small and widely depended on, an addition to it is a minor bump and any
+change to existing public behaviour is a major one — internal fixes are patches.
+
 ## Questions?
 
 Feel free to open an issue or reach out to support@spendowl.io.
