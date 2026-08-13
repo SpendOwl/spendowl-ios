@@ -92,37 +92,11 @@ final class AttributionService: @unchecked Sendable {
         // Get attribution token from AdServices (with retry for transient errors)
         let token = try await getAttributionToken()
 
-        // Build request with device info
-        let info = DeviceInfo(
-            osVersion: osVersion,
-            model: deviceModel,
-            locale: Locale.current.identifier
-        )
-        let bundleId = Bundle.main.bundleIdentifier ?? "unknown"
-        let request = AttributionRequest(
-            attributionToken: token,
-            bundleId: bundleId,
-            appVersion: appVersion,
-            sdkVersion: SpendOwl.sdkVersion,
+        let request = makeRequestAndPersistPending(
+            token: token,
             userId: userId,
-            externalUserId: externalUserId,
-            deviceInfo: info
+            externalUserId: externalUserId
         )
-
-        // Defensively persist the payload before the first send so a backgrounding
-        // mid-request doesn't lose the install. Cleared on success.
-        queue.save(PendingAttribution(
-            attributionToken: token,
-            bundleId: bundleId,
-            appVersion: appVersion,
-            sdkVersion: SpendOwl.sdkVersion,
-            userId: userId,
-            externalUserId: externalUserId,
-            osVersion: info.osVersion,
-            deviceModel: info.model,
-            locale: info.locale,
-            createdAt: Date()
-        ))
 
         do {
             let result = try await sender(request)
@@ -136,6 +110,50 @@ final class AttributionService: @unchecked Sendable {
     }
 
     // MARK: - Private Methods
+
+    /// Builds the request for a fresh send and, as a deliberate side effect, persists it as
+    /// pending first — hence the name.
+    ///
+    /// The save happens before the first network attempt so a backgrounding mid-request
+    /// doesn't lose the install; ``applySuccess(_:)`` clears it. The two are built together
+    /// because they must describe the same send.
+    private func makeRequestAndPersistPending(
+        token: String,
+        userId: String?,
+        externalUserId: String?
+    ) -> AttributionRequest {
+        let info = DeviceInfo(
+            osVersion: osVersion,
+            model: deviceModel,
+            locale: Locale.current.identifier
+        )
+        let bundleId = Bundle.main.bundleIdentifier ?? "unknown"
+
+        queue.save(PendingAttribution(
+            attributionToken: token,
+            bundleId: bundleId,
+            appVersion: appVersion,
+            sdkVersion: SpendOwl.sdkVersion,
+            userId: userId,
+            externalUserId: externalUserId,
+            osVersion: info.osVersion,
+            deviceModel: info.model,
+            locale: info.locale,
+            createdAt: Date()
+        ))
+
+        return AttributionRequest(
+            attributionToken: token,
+            bundleId: bundleId,
+            appVersion: appVersion,
+            sdkVersion: SpendOwl.sdkVersion,
+            userId: userId,
+            externalUserId: externalUserId,
+            deviceInfo: info,
+            // Read now rather than persisted: see the note on the replay path.
+            consumableHistoryEnabled: ConsumableHistory.isEnabled
+        )
+    }
 
     private func getAttributionToken() async throws -> String {
         guard #available(iOS 14.3, *) else {
@@ -228,7 +246,12 @@ final class AttributionService: @unchecked Sendable {
                 osVersion: pending.osVersion,
                 model: pending.deviceModel,
                 locale: pending.locale
-            )
+            ),
+            // Read now rather than from the persisted payload: that row can be days old and
+            // the app may have shipped an update since. Same reasoning as the identity
+            // fields above — the token and device describe the original install, the rest
+            // describes the app as it is today.
+            consumableHistoryEnabled: ConsumableHistory.isEnabled
         )
 
         do {

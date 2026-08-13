@@ -107,6 +107,23 @@ final class PurchaseTrackerTests: XCTestCase {
         XCTAssertEqual(next.pendingCountForTesting, 1, "the queue must still hold exactly one copy")
     }
 
+    // MARK: - Events payload
+
+    /// Purchase events carry the opt-in too, not just attribution. Attribution is sent once
+    /// per install, so on its own it would freeze at whatever was true on first launch — an
+    /// app that adds the key in a later version would keep reporting the old answer for its
+    /// whole existing install base. Events flow continuously and keep it current.
+    func testEventsRequestCarriesConsumableHistoryOptIn() {
+        let tracker = makeTracker()
+        XCTAssertTrue(tracker.enqueueForTesting(transactionId: "tx-1"))
+
+        let request = tracker.makeEventsRequest(for: tracker.queuedEventsForTesting)
+
+        XCTAssertEqual(request.consumableHistoryEnabled, ConsumableHistory.isEnabled)
+        XCTAssertEqual(request.consumableHistoryEnabled, false, "test host declares no key")
+        XCTAssertEqual(request.events.map(\.transactionId), ["tx-1"])
+    }
+
     // MARK: - Confirmed-sent cap
 
     /// Regression: the cap used to hold a `Set` and evict whatever `Set.first(where:)`

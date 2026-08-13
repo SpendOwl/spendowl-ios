@@ -155,6 +155,13 @@ struct AttributionRequest: Encodable {
     /// additional attribute for reporting/search; never used as the join key.
     let externalUserId: String?
     let deviceInfo: DeviceInfo
+    /// Whether the host app opted into finished-consumable transaction history.
+    ///
+    /// Reports the app's declared intent so integration health is visible server-side
+    /// rather than only in a developer's debug console. Declaring it is not the same as
+    /// benefiting from it — the behaviour also needs iOS 18 / macOS 15 at runtime, so read
+    /// this alongside `deviceInfo.osVersion`. See ``ConsumableHistory``.
+    let consumableHistoryEnabled: Bool
 }
 
 /// Device information included with requests.
@@ -174,6 +181,12 @@ struct EventsRequest: Encodable {
     /// metadata only; never used to match purchases to attribution.
     let externalUserId: String?
     let bundleId: String
+    /// Whether the host app opted into finished-consumable transaction history.
+    ///
+    /// Carried here as well as on attribution because attribution is only sent once per
+    /// install: an app that adds the key in a later version would otherwise keep reporting
+    /// the value from its very first launch. Purchase events keep it current.
+    let consumableHistoryEnabled: Bool
 }
 
 /// A single purchase event.
